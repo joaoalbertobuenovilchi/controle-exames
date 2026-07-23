@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle de Exames Laboratoriais</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<style>
+:root{
+  --bg:#F4F7F7;
+  --panel:#FFFFFF;
+  --ink:#16323A;
+  --ink-soft:#5B7480;
+  --line:#E1E9EA;
+  --teal:#0E6E6E;
+  --teal-dark:#0A4F4F;
+  --teal-soft:#E3F2F1;
+  --amber:#D98A3D;
+  --amber-soft:#FBEBD9;
+  --red:#C1483F;
+  --red-soft:#FBE7E5;
+  --green:#3E8E5A;
+  --green-soft:#E5F3EA;
+  --radius:10px;
+  --shadow:0 1px 2px rgba(16,50,58,.06), 0 4px 14px rgba(16,50,58,.05);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--ink);}
+::-webkit-scrollbar{height:8px;width:8px;}
+::-webkit-scrollbar-thumb{background:#c7d6d6;border-radius:8px;}
+
+/* Layout */
+#app{display:flex;min-height:100vh;}
+.sidebar{
+  width:250px;flex:0 0 250px;background:linear-gradient(180deg,var(--teal-dark),#0C5A5A);
+  color:#fff;padding:22px 14px;position:sticky;top:0;height:100vh;overflow-y:auto;
+}
+.brand{display:flex;align-items:center;gap:10px;padding:0 8px 18px 8px;border-bottom:1px solid rgba(255,255,255,.15);margin-bottom:16px;}
+.brand-mark{width:34px;height:34px;border-radius:9px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:18px;}
+.brand-title{font-size:13.5px;font-weight:700;line-height:1.25;letter-spacing:.2px;}
+.brand-sub{font-size:10.5px;opacity:.75;margin-top:1px;}
+
+nav.navlist{display:flex;flex-direction:column;gap:3px;}
+.navgroup-label{font-size:10px;text-transform:uppercase;letter-spacing:.09em;opacity:.55;margin:14px 10px 6px;}
+.navitem{
+  display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;
+  font-size:13.5px;color:rgba(255,255,255,.85);transition:background .12s ease;user-select:none;
+}
+.navitem:hover{background:rgba(255,255,255,.08);}
+.navitem.active{background:#fff;color:var(--teal-dark);font-weight:600;}
+.navitem .ic{width:18px;text-align:center;font-size:14px;}
+
+.side-footer{margin-top:22px;padding:12px 10px;background:rgba(255,255,255,.08);border-radius:8px;font-size:11px;line-height:1.5;opacity:.85;}
+
+main{flex:1;min-width:0;padding:26px 34px 60px;}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:10px;}
+.topbar h1{font-size:21px;margin:0;font-weight:700;}
+.topbar .desc{font-size:12.5px;color:var(--ink-soft);margin-top:3px;}
+.period-pill{
+  display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
+  padding:7px 12px;border-radius:999px;font-size:12.5px;box-shadow:var(--shadow);
+}
+.period-pill b{color:var(--teal-dark);}
+.backup-group{display:flex;gap:8px;flex-wrap:wrap;}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:18px;}
+.card h2{font-size:14.5px;margin:0 0 4px;font-weight:700;}
+.card h2.sortable-title{cursor:pointer;display:inline-flex;align-items:center;gap:8px;user-select:none;transition:color .12s;}
+.card h2.sortable-title:hover{color:var(--teal);}
+.card h2.sortable-title:hover .sort-ic{background:var(--teal);color:#fff;}
+.card h2.sortable-title .sort-ic{font-size:10px;font-weight:700;color:var(--teal-dark);background:var(--teal-soft);padding:2px 7px;border-radius:999px;letter-spacing:.03em;transition:all .12s;}
+.card .subtitle{font-size:12px;color:var(--ink-soft);margin-bottom:14px;}
+
+.grid{display:grid;gap:16px;}
+.grid.cols-4{grid-template-columns:repeat(4,1fr);}
+.grid.cols-3{grid-template-columns:repeat(3,1fr);}
+.grid.cols-2{grid-template-columns:repeat(2,1fr);}
+@media(max-width:1100px){.grid.cols-4{grid-template-columns:repeat(2,1fr);}.grid.cols-3{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:640px){.grid.cols-4,.grid.cols-3,.grid.cols-2{grid-template-columns:1fr;} main{padding:18px;} .sidebar{position:fixed;z-index:40;transform:translateX(-100%);transition:transform .2s;} .sidebar.open{transform:translateX(0);} #menuBtn{display:inline-flex;}}
+
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);}
+.stat .label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);font-weight:600;}
+.stat .value{font-size:24px;font-weight:800;color:var(--teal-dark);margin-top:6px;}
+.stat .hint{font-size:11px;color:var(--ink-soft);margin-top:4px;}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px;}
+thead th{
+  text-align:left;background:var(--teal-soft);color:var(--teal-dark);font-weight:700;
+  padding:8px 10px;border-bottom:2px solid var(--line);white-space:nowrap;position:sticky;top:0;
+}
+tbody td{padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;}
+tbody tr:hover{background:#FAFCFC;}
+tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px solid var(--line);}
+.table-wrap{overflow:auto;max-height:460px;border:1px solid var(--line);border-radius:8px;}
+.empty-row td{text-align:center;color:var(--ink-soft);padding:22px;}
+
+.badge{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;}
+.badge.ativo{background:var(--green-soft);color:var(--green);}
+.badge.inativo{background:var(--red-soft);color:var(--red);}
+.badge.tipo-cd{background:var(--teal-soft);color:var(--teal-dark);}
+.badge.tipo-disp{background:var(--amber-soft);color:#8a5a1c;}
+.badge.tipo-pregao{background:#EAE6F8;color:#5B3FA3;}
+
+.btn{
+  border:none;cursor:pointer;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:8px;
+  background:var(--teal);color:#fff;display:inline-flex;align-items:center;gap:6px;transition:filter .12s;
+}
+.btn:hover{filter:brightness(1.08);}
+.btn.secondary{background:var(--panel);color:var(--teal-dark);border:1px solid var(--line);}
+.btn.danger{background:var(--red-soft);color:var(--red);}
+.btn.ghost{background:transparent;color:var(--ink-soft);padding:4px 8px;}
+.btn.small{padding:5px 10px;font-size:11.5px;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+
+.formgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+@media(max-width:900px){.formgrid{grid-template-columns:repeat(2,1fr);}}
+.field label{font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em;}
+.field input, .field select{
+  width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;background:#fff;color:var(--ink);
+}
+.field input:focus, .field select:focus{outline:2px solid var(--teal);outline-offset:1px;}
+
+.tabs{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+.tab{padding:9px 16px;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;border-bottom:2px solid transparent;}
+.tab.active{color:var(--teal-dark);border-bottom-color:var(--teal);}
+
+.toast{
+  position:fixed;bottom:22px;right:22px;background:var(--teal-dark);color:#fff;padding:12px 18px;
+  border-radius:9px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.18);z-index:100;opacity:0;
+  transform:translateY(8px);transition:all .25s ease;pointer-events:none;
+}
+.toast.show{opacity:1;transform:translateY(0);}
+
+.helpbox{background:var(--teal-soft);border:1px solid #CFE7E5;color:var(--teal-dark);padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:14px;line-height:1.5;}
+.flexrow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.chartbox{height:260px;}
+#menuBtn{display:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;cursor:pointer;}
+.loading-screen{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;z-index:200;color:var(--ink-soft);font-size:13px;}
+.spinner{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--teal);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.section-title{font-size:16px;font-weight:800;margin:26px 0 10px;color:var(--teal-dark);}
+.muted{color:var(--ink-soft);}
+.right{text-align:right;}
+</style>
+</head>
+<body>
+
+<div class="loading-screen" id="loadingScreen"><div class="spinner"></div>Carregando dados…</div>
+
+<div id="app" style="display:none;">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">🧪</div>
+      <div>
+        <div class="brand-title">CONTROLE DE EXAMES<br>LABORATORIAIS</div>
+        <div class="brand-sub">Prefeitura Municipal de Jaborandi</div>
+      </div>
+    </div>
+    <nav class="navlist" id="navlist"></nav>
+    <div class="side-footer">
+      Seus dados ficam salvos automaticamente na nuvem, vinculados à sua conta. Acesse este mesmo link de qualquer computador — inclusive do home office — para continuar de onde parou.
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <button id="menuBtn">☰</button>
+      <div>
+        <h1 id="pageTitle">Dashboard</h1>
+        <div class="desc" id="pageDesc">Visão geral do controle de exames</div>
+      </div>
+      <div class="period-pill">📅 Competência atual: <b id="pillCompetencia">—</b>
+        <button class="btn ghost small" onclick="openCompetenciaEditor()">alterar</button>
+      </div>
+      <div class="backup-group">
+        <button class="btn secondary small" onclick="exportAllData()" title="Baixa um arquivo com todos os dados cadastrados, para usar em uma nova versão">⭳ Exportar dados</button>
+        <button class="btn secondary small" onclick="document.getElementById('importFileInput').click()" title="Carrega um arquivo de backup exportado anteriormente">⭱ Importar dados</button>
+        <input type="file" id="importFileInput" accept="application/json" style="display:none;" onchange="importAllData(event)">
+      </div>
+    </div>
+    <div id="view"></div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   CONTROLE DE EXAMES LABORATORIAIS — versão web
+   Recriação funcional da planilha original (.xlsm), mantendo os
+   mesmos conceitos: Cadastro de Laboratórios, Cadastro de Exames,
+   Lançamento por tipo de convênio (Compra Direta / Dispensa /
+   Pregão), Emissão de N.F., Dashboard e Relatórios consolidados.
+   Os dados ficam salvos na nuvem (por usuário) via window.storage,
+   substituindo as macros/backups internos do Excel por um botão
+   de "Fechar Competência".
+   ============================================================ */
+
+const MESES = ["JANEIRO","FEVEREIRO","MARÇO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"];
+const CONVENIOS = [
+  {key:"COMPRADIRETA", label:"Compra Direta", badge:"tipo-cd"},
+  {key:"DISPENSA", label:"Dispensa", badge:"tipo-disp"},
+  {key:"PREGAO", label:"Pregão", badge:"tipo-pregao"},
+];
+
+let STATE = {
+  labs: [],
+  exames: [],
+  lancamentos: [],
+  historico: [],
+  competencia: { mes: MESES[new Date().getMonth()], ano: new Date().getFullYear() },
+};
+
+let currentView = "dashboard";
+let lancTab = "COMPRADIRETA";
+let nfTab = "COMPRADIRETA";
+
+/* ---------------- Storage ---------------- */
+async function loadState(){
+  try{
+    const res = await window.storage.get('app-data', false);
+    if(res && res.value){
+      const parsed = JSON.parse(res.value);
+      STATE = Object.assign(STATE, parsed);
+    }
+  }catch(e){ /* first run: no data yet */ }
+}
+let saveTimer = null;
+function saveState(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    try{
+      await window.storage.set('app-data', JSON.stringify(STATE), false);
+    }catch(e){ showToast('Erro ao salvar dados na nuvem.'); console.error(e); }
+  }, 250);
+}
+
+/* ---------------- Utils ---------------- */
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function fmtMoney(v){ v = Number(v)||0; return v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function fmtNum(v){ return (Number(v)||0).toLocaleString('pt-BR'); }
+function todayISO(){ const d=new Date(); return d.toISOString().slice(0,16); }
+function convenioLabel(key){ return (CONVENIOS.find(c=>c.key===key)||{}).label || key; }
+function convenioBadge(key){ return (CONVENIOS.find(c=>c.key===key)||{}).badge || ''; }
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2600);
+}
+function esc(s){ return (s===undefined||s===null)?'':String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeRegExp(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+
+/* Re-render debounced so typing in search/filter fields doesn't lose focus on every keystroke */
+let renderDebounceTimer = null;
+function debouncedRender(){ clearTimeout(renderDebounceTimer); renderDebounceTimer = setTimeout(render, 350); }
+
+/* ---------------- Localizar / Substituir / Excluir ---------------- */
+let frState = {
+  labs:   { field:'nome',      term:'', replace:'' },
+  exames: { field:'descricao', term:'', replace:'' },
+  lanc:   { field:'exame',     term:'', replace:'' },
+};
+function frSet(scope,key,val){ frState[scope][key]=val; }
+
+function frMatchLabs(){
+  const {field, term} = frState.labs;
+  if(!term.trim()) return [];
+  return STATE.labs.filter(l => String(l[field]||'').toLowerCase().includes(term.toLowerCase()));
+}
+function frMatchExames(){
+  const {field, term} = frState.exames;
+  if(!term.trim()) return [];
+  return STATE.exames.filter(e => String(e[field]||'').toLowerCase().includes(term.toLowerCase()));
+}
+const LANC_FIELD_MAP = {exame:'exameDescricao', paciente:'paciente', laboratorio:'laboratorio', unidade:'unidade'};
+function frMatchLanc(){
+  const {field, term} = frState.lanc;
+  if(!term.trim()) return [];
+  const f = LANC_FIELD_MAP[field]||field;
+  return STATE.lancamentos.filter(l => l.convenio===lancTab && String(l[f]||'').toLowerCase().includes(term.toLowerCase()));
+}
+
+function frDeleteLabs(){
+  const matches = frMatchLabs();
+  if(matches.length===0){ showToast('Nenhum resultado encontrado.'); return; }
+  if(!confirm(`Excluir ${matches.length} laboratório(s) encontrado(s)? Esta ação não pode ser desfeita.`)) return;
+  const ids = new Set(matches.map(m=>m.id));
+  STATE.labs = STATE.labs.filter(l=>!ids.has(l.id));
+  frState.labs.term=''; saveState(); render(); showToast('Laboratório(s) excluído(s).');
+}
+function frReplaceLabs(){
+  const matches = frMatchLabs();
+  if(matches.length===0){ showToast('Nenhum resultado encontrado.'); return; }
+  const {field, term, replace} = frState.labs;
+  if(!replace.trim()){ showToast('Informe o texto para substituição.'); return; }
+  if(!confirm(`Substituir "${term}" por "${replace}" em ${matches.length} registro(s)?`)) return;
+  matches.forEach(m=>{
+    const oldNome = m.nome;
+    m[field] = String(m[field]).replace(new RegExp(escapeRegExp(term),'ig'), replace);
+    if(field==='nome' && oldNome!==m.nome){
+      // mantém a integridade: atualiza o nome do laboratório em exames, lançamentos e histórico
+      STATE.exames.forEach(e=>{ if(e.laboratorio===oldNome) e.laboratorio=m.nome; });
+      STATE.lancamentos.forEach(l=>{ if(l.laboratorio===oldNome) l.laboratorio=m.nome; });
+      STATE.historico.forEach(h=>{ (h.porLaboratorio||[]).forEach(pl=>{ if(pl.laboratorio===oldNome) pl.laboratorio=m.nome; }); });
+    }
+  });
+  saveState(); render(); showToast('Substituição concluída.');
+}
+function frDeleteExames(){
+  const matches = frMatchExames();
+  if(matches.length===0){ showToast('Nenhum resultado encontrado.'); return; }
+  if(!confirm(`Excluir ${matches.length} exame(s) do cadastro? Esta ação não pode ser desfeita.`)) return;
+  const ids = new Set(matches.map(m=>m.id));
+  STATE.exames = STATE.exames.filter(e=>!ids.has(e.id));
+  frState.exames.term=''; saveState(); render(); showToast('Exame(s) excluído(s) do cadastro.');
+}
+function frReplaceExames(){
+  const matches = frMatchExames();
+  if(matches.length===0){ showToast('Nenhum resultado encontrado.'); return; }
+  const {field, term, replace} = frState.exames;
+  if(!replace.trim()){ showToast('Informe o texto para substituição.'); return; }
+  if(!confirm(`Substituir "${term}" por "${replace}" em ${matches.length} exame(s)?`)) return;
+  matches.forEach(e=>{
+    e[field] = String(e[field]).replace(new RegExp(escapeRegExp(term),'ig'), replace);
+    if(field==='descricao'){
+      STATE.lancamentos.forEach(l=>{ if(l.exameId===e.id) l.exameDescricao=e.descricao; });
+    }
+  });
+  saveState(); render(); showToast('Substituição concluída.');
+}
+function frDeleteLanc(){
+  const matches = frMatchLanc();
+  if(matches.length===0){ showToast('Nenhum resultado encontrado nesta aba.'); return; }
+  if(!confirm(`Excluir ${matches.length} lançamento(s) encontrado(s) na aba ${convenioLabel(lancTab)}? Cada linha inteira será apagada. Esta ação não pode ser desfeita.`)) return;
+  const ids = new Set(matches.map(m=>m.id));
+  STATE.lancamentos = STATE.lancamentos.filter(l=>!ids.has(l.id));
+  frState.lanc.term=''; saveState(); render(); showToast('Lançamento(s) excluído(s).');
+}
+function frReplaceLanc(){
+  const matches = frMatchLanc();
+  if(matches.length===0){ showToast('Nenhum resultado encontrado nesta aba.'); return; }
+  const {field, term, replace} = frState.lanc;
+  if(!replace.trim()){ showToast('Informe o texto para substituição.'); return; }
+  const f = LANC_FIELD_MAP[field]||field;
+  if(!confirm(`Substituir "${term}" por "${replace}" em ${matches.length} lançamento(s)?`)) return;
+  matches.forEach(m=>{ m[f] = String(m[f]).replace(new RegExp(escapeRegExp(term),'ig'), replace); });
+  saveState(); render(); showToast('Substituição concluída.');
+}
+
+function findReplacePanel(scope, fieldOptions, matchCountFn, deleteFn, replaceFn){
+  const st = frState[scope];
+  const count = st.term.trim() ? matchCountFn().length : 0;
+  return `
+  <div class="card">
+    <h2>🔍 Localizar, substituir e excluir</h2>
+    <div class="subtitle">Busque por um campo, substitua o texto encontrado em todos os resultados, ou exclua ${scope==='lanc'?'as linhas inteiras dos lançamentos':'os registros'} correspondentes.</div>
+    <div class="formgrid" style="grid-template-columns:1.1fr 1.4fr 1.4fr auto auto;align-items:end;">
+      <div class="field"><label>Campo</label>
+        <select onchange="frSet('${scope}','field',this.value); render();">
+          ${fieldOptions.map(f=>`<option value="${f.key}" ${st.field===f.key?'selected':''}>${f.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Localizar</label><input value="${esc(st.term)}" placeholder="Ex: Hemograma Completo" oninput="frSet('${scope}','term',this.value); debouncedRender();"></div>
+      <div class="field"><label>Substituir por (opcional)</label><input value="${esc(st.replace)}" placeholder="Novo texto" oninput="frSet('${scope}','replace',this.value); debouncedRender();"></div>
+      <div class="field"><button class="btn secondary" onclick="render()">🔎 Localizar (${count})</button></div>
+      <div class="field" style="display:flex;gap:8px;">
+        <button class="btn secondary" onclick="${replaceFn}()">✏️ Substituir</button>
+        <button class="btn danger" onclick="${deleteFn}()">🗑 Excluir</button>
+      </div>
+    </div>
+    ${st.term.trim() ? `<div class="helpbox" style="margin-top:10px;">${count} registro(s) encontrado(s)${count>0?' — confira antes de excluir; a exclusão não pode ser desfeita.':''}</div>` : ''}
+  </div>`;
+}
+
+function activeLabs(){ return STATE.labs.filter(l=>l.tipo==='ATIVO'); }
+function labsForSelect(){ return STATE.labs; }
+
+function currentCompKey(){ return STATE.competencia.mes+'/'+STATE.competencia.ano; }
+
+/* Exames de um convênio + laboratório específicos (ativos) */
+function examesFor(convenioLabel_, laboratorio){
+  return STATE.exames.filter(e => e.convenio === convenioLabel_ && e.laboratorio === laboratorio && e.tipo === 'ATIVO');
+}
+
+/* Quantidade já usada de cota principal para um exame, dentro da competência atual */
+function usoCotaPrincipal(exameId){
+  return STATE.lancamentos
+    .filter(l=>l.exameId===exameId)
+    .reduce((s,l)=>s+l.qtdCP,0);
+}
+
+/* ---------------- Navigation ---------------- */
+const NAV = [
+  {group:'Visão Geral', items:[
+    {id:'dashboard', label:'Dashboard', icon:'📊'},
+  ]},
+  {group:'Cadastros', items:[
+    {id:'labs', label:'Laboratórios', icon:'🏥'},
+    {id:'exames', label:'Exames', icon:'🧾'},
+  ]},
+  {group:'Lançamentos', items:[
+    {id:'lancamento', label:'Lançar Exames', icon:'✍️'},
+  ]},
+  {group:'Faturamento', items:[
+    {id:'nf', label:'Emissão de N.F.', icon:'💵'},
+  ]},
+  {group:'Consolidado', items:[
+    {id:'relatorios', label:'Relatórios', icon:'📁'},
+  ]},
+];
+const PAGE_META = {
+  dashboard:['Dashboard','Visão geral atualizada automaticamente com base nos lançamentos e no histórico.'],
+  labs:['Cadastro de Laboratórios','Cadastre os laboratórios conveniados e seus contatos.'],
+  exames:['Cadastro de Exames','Defina exames, cotas (principal/reserva) e valor unitário por laboratório e convênio.'],
+  lancamento:['Lançamento de Exames','Registre os exames realizados por paciente, por tipo de convênio/processo.'],
+  nf:['Emissão de N.F.','Resumo de quantidades e valores para solicitar as notas fiscais dos laboratórios.'],
+  relatorios:['Relatórios','Consolidado de todas as competências já fechadas.'],
+};
+
+function renderNav(){
+  const nav = document.getElementById('navlist');
+  nav.innerHTML = NAV.map(g=>`
+    <div class="navgroup-label">${g.group}</div>
+    ${g.items.map(it=>`<div class="navitem ${currentView===it.id?'active':''}" onclick="goto('${it.id}')"><span class="ic">${it.icon}</span>${it.label}</div>`).join('')}
+  `).join('');
+}
+function goto(view){
+  currentView = view;
+  document.getElementById('pageTitle').textContent = PAGE_META[view][0];
+  document.getElementById('pageDesc').textContent = PAGE_META[view][1];
+  document.getElementById('sidebar').classList.remove('open');
+  renderNav();
+  render();
+}
+
+/* ---------------- Render dispatcher ---------------- */
+function render(){
+  document.getElementById('pillCompetencia').textContent = STATE.competencia.mes+' / '+STATE.competencia.ano;
+  const v = document.getElementById('view');
+  if(currentView==='dashboard') v.innerHTML = viewDashboard();
+  else if(currentView==='labs') v.innerHTML = viewLabs();
+  else if(currentView==='exames') v.innerHTML = viewExames();
+  else if(currentView==='lancamento') v.innerHTML = viewLancamento();
+  else if(currentView==='nf') v.innerHTML = viewNF();
+  else if(currentView==='relatorios') v.innerHTML = viewRelatorios();
+  afterRender();
+}
+function afterRender(){
+  if(currentView==='dashboard') drawDashboardCharts();
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+function allPeriodsData(){
+  // histórico fechado + período atual (se houver lançamentos)
+  const periods = STATE.historico.map(h=>({...h, isCurrent:false}));
+  const atual = computeCompetenciaTotals(STATE.lancamentos);
+  if(STATE.lancamentos.length>0){
+    periods.push({
+      nomeBase: 'ATUAL', mes: STATE.competencia.mes, ano: STATE.competencia.ano,
+      isCurrent:true, ...atual
+    });
+  }
+  return periods;
+}
+function computeCompetenciaTotals(lancs){
+  const byConv = {COMPRADIRETA:{qtd:0,valor:0}, DISPENSA:{qtd:0,valor:0}, PREGAO:{qtd:0,valor:0}};
+  lancs.forEach(l=>{ byConv[l.convenio].qtd += l.quantidade; byConv[l.convenio].valor += l.valorTotal; });
+  const qtdTotal = byConv.COMPRADIRETA.qtd+byConv.DISPENSA.qtd+byConv.PREGAO.qtd;
+  const valorTotal = byConv.COMPRADIRETA.valor+byConv.DISPENSA.valor+byConv.PREGAO.valor;
+  return {
+    qtdCompraDireta:byConv.COMPRADIRETA.qtd, valorCompraDireta:byConv.COMPRADIRETA.valor,
+    qtdDispensa:byConv.DISPENSA.qtd, valorDispensa:byConv.DISPENSA.valor,
+    qtdPregao:byConv.PREGAO.qtd, valorPregao:byConv.PREGAO.valor,
+    qtdTotal, valorTotal
+  };
+}
+function viewDashboard(){
+  const periods = allPeriodsData();
+  const qtdTotal = periods.reduce((s,p)=>s+p.qtdTotal,0);
+  const valorTotal = periods.reduce((s,p)=>s+p.valorTotal,0);
+  const ticket = qtdTotal>0 ? valorTotal/qtdTotal : 0;
+  const totCD = periods.reduce((s,p)=>s+p.valorCompraDireta,0);
+  const totDisp = periods.reduce((s,p)=>s+p.valorDispensa,0);
+  const totPreg = periods.reduce((s,p)=>s+p.valorPregao,0);
+  const pctCD = valorTotal>0 ? (totCD/valorTotal*100) : 0;
+
+  if(periods.length===0){
+    return `<div class="card"><div class="helpbox">Nenhum dado ainda. Comece cadastrando laboratórios e exames, depois registre lançamentos em <b>Lançar Exames</b>.</div></div>`;
+  }
+
+  return `
+    <div class="grid cols-4">
+      <div class="stat"><div class="label">Períodos registrados</div><div class="value">${periods.length}</div><div class="hint">competências com lançamentos</div></div>
+      <div class="stat"><div class="label">Total de exames realizados</div><div class="value">${fmtNum(qtdTotal)}</div><div class="hint">todas as competências</div></div>
+      <div class="stat"><div class="label">Valor total geral</div><div class="value">${fmtMoney(valorTotal)}</div><div class="hint">soma de todos os convênios</div></div>
+      <div class="stat"><div class="label">Ticket médio por exame</div><div class="value">${fmtMoney(ticket)}</div><div class="hint">valor total ÷ qtd. total</div></div>
+    </div>
+    <div class="grid cols-4" style="margin-top:16px;">
+      <div class="stat"><div class="label">Total Compra Direta</div><div class="value" style="font-size:18px;">${fmtMoney(totCD)}</div></div>
+      <div class="stat"><div class="label">Total Dispensa</div><div class="value" style="font-size:18px;">${fmtMoney(totDisp)}</div></div>
+      <div class="stat"><div class="label">Total Pregão</div><div class="value" style="font-size:18px;">${fmtMoney(totPreg)}</div></div>
+      <div class="stat"><div class="label">% Compra Direta no total</div><div class="value" style="font-size:18px;">${pctCD.toFixed(1)}%</div></div>
+    </div>
+    <div class="grid cols-2" style="margin-top:16px;">
+      <div class="card"><h2>Valor total por tipo de convênio</h2><div class="subtitle">Comparativo entre Compra Direta, Dispensa e Pregão</div><div class="chartbox"><canvas id="chartConv"></canvas></div></div>
+      <div class="card"><h2>Evolução do valor total por período</h2><div class="subtitle">Cada competência fechada + a competência atual</div><div class="chartbox"><canvas id="chartEvo"></canvas></div></div>
+    </div>
+  `;
+}
+let chartConvRef=null, chartEvoRef=null;
+function drawDashboardCharts(){
+  const c1 = document.getElementById('chartConv');
+  const c2 = document.getElementById('chartEvo');
+  if(!c1||!c2) return;
+  const periods = allPeriodsData();
+  const totCD = periods.reduce((s,p)=>s+p.valorCompraDireta,0);
+  const totDisp = periods.reduce((s,p)=>s+p.valorDispensa,0);
+  const totPreg = periods.reduce((s,p)=>s+p.valorPregao,0);
+  if(chartConvRef) chartConvRef.destroy();
+  chartConvRef = new Chart(c1, {
+    type:'bar',
+    data:{ labels:['Compra Direta','Dispensa','Pregão'], datasets:[{ data:[totCD,totDisp,totPreg], backgroundColor:['#0E6E6E','#D98A3D','#5B3FA3'], borderRadius:6 }]},
+    options:{ plugins:{legend:{display:false}}, scales:{ y:{ticks:{callback:v=>fmtMoney(v)}} } }
+  });
+  if(chartEvoRef) chartEvoRef.destroy();
+  chartEvoRef = new Chart(c2, {
+    type:'line',
+    data:{ labels: periods.map(p=>p.mes.slice(0,3)+'/'+String(p.ano).slice(2)),
+      datasets:[{ label:'Valor total', data: periods.map(p=>p.valorTotal), borderColor:'#0E6E6E', backgroundColor:'rgba(14,110,110,.12)', fill:true, tension:.3 }]},
+    options:{ plugins:{legend:{display:false}}, scales:{ y:{ticks:{callback:v=>fmtMoney(v)}} } }
+  });
+}
+
+/* ============================================================
+   CADASTRO DE LABORATÓRIOS
+   ============================================================ */
+function viewLabs(){
+  return `
+    <div class="card">
+      <h2>Novo laboratório</h2>
+      <div class="subtitle">Preencha os dados e clique em adicionar</div>
+      <div class="formgrid">
+        <div class="field"><label>Status</label><select id="labTipo"><option value="ATIVO">Ativo</option><option value="INATIVO">Inativo</option></select></div>
+        <div class="field"><label>Nome fantasia</label><input id="labNome" placeholder="Ex: LABORVITA"></div>
+        <div class="field"><label>Telefone</label><input id="labTelefone" placeholder="(00) 0000-0000"></div>
+        <div class="field"><label>Celular</label><input id="labCelular" placeholder="(00) 00000-0000"></div>
+        <div class="field"><label>E-mail</label><input id="labEmail" placeholder="contato@laboratorio.com"></div>
+      </div>
+      <div style="margin-top:14px;"><button class="btn" onclick="addLab()">+ Adicionar laboratório</button></div>
+    </div>
+    ${findReplacePanel('labs', [
+      {key:'nome',label:'Nome Fantasia'},{key:'telefone',label:'Telefone'},{key:'celular',label:'Celular'},{key:'email',label:'E-mail'}
+    ], frMatchLabs, 'frDeleteLabs', 'frReplaceLabs')}
+    <div class="card">
+      <h2 class="sortable-title" onclick="sortLabs()" title="Clique para colocar em ordem alfabética">Laboratórios cadastrados <span class="sort-ic">⇅ A-Z</span></h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Status</th><th>Nome Fantasia</th><th>Telefone</th><th>Celular</th><th>E-mail</th><th></th></tr></thead>
+        <tbody>
+          ${STATE.labs.length===0 ? `<tr class="empty-row"><td colspan="6">Nenhum laboratório cadastrado ainda.</td></tr>` :
+            STATE.labs.map(l=>`
+            <tr>
+              <td><span class="badge ${l.tipo==='ATIVO'?'ativo':'inativo'}">${l.tipo}</span></td>
+              <td><b>${esc(l.nome)}</b></td>
+              <td>${esc(l.telefone)||'—'}</td>
+              <td>${esc(l.celular)||'—'}</td>
+              <td>${esc(l.email)||'—'}</td>
+              <td><button class="btn ghost small" onclick="deleteLab('${l.id}')">🗑 excluir</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+function addLab(){
+  const nome = document.getElementById('labNome').value.trim();
+  if(!nome){ showToast('Informe o nome fantasia do laboratório.'); return; }
+  STATE.labs.push({
+    id: uid(),
+    tipo: document.getElementById('labTipo').value,
+    nome: nome.toUpperCase(),
+    telefone: document.getElementById('labTelefone').value.trim(),
+    celular: document.getElementById('labCelular').value.trim(),
+    email: document.getElementById('labEmail').value.trim(),
+  });
+  saveState(); render(); showToast('Laboratório adicionado.');
+}
+function deleteLab(id){
+  if(!confirm('Excluir este laboratório? Exames vinculados a ele não serão apagados automaticamente.')) return;
+  STATE.labs = STATE.labs.filter(l=>l.id!==id);
+  saveState(); render();
+}
+function sortLabs(){
+  // Apenas reordena a lista (A-Z pelo nome fantasia). Nenhum item é apagado ou alterado.
+  STATE.labs.sort((a,b)=> a.nome.localeCompare(b.nome, 'pt-BR', {sensitivity:'base'}));
+  saveState(); render(); showToast('Laboratórios organizados em ordem alfabética.');
+}
+
+/* ============================================================
+   CADASTRO DE EXAMES
+   ============================================================ */
+function viewExames(){
+  const labsOpts = labsForSelect().map(l=>`<option value="${esc(l.nome)}">${esc(l.nome)}</option>`).join('');
+  return `
+    <div class="card">
+      <h2>Novo exame</h2>
+      <div class="subtitle">Defina a cota principal e a cota reserva — o lançamento consome a cota principal primeiro e depois a reserva, automaticamente.</div>
+      <div class="formgrid">
+        <div class="field"><label>Status</label><select id="exTipo"><option value="ATIVO">Ativo</option><option value="INATIVO">Inativo</option></select></div>
+        <div class="field" style="grid-column:span 2;"><label>Descrição do exame</label><input id="exDescricao" placeholder="Ex: Ácido Fólico"></div>
+        <div class="field"><label>Laboratório</label><select id="exLab">${labsOpts || '<option value="">Cadastre um laboratório primeiro</option>'}</select></div>
+        <div class="field"><label>Tipo de convênio/processo</label><select id="exConvenio">
+          <option value="COMPRA DIRETA">Compra Direta</option>
+          <option value="DISPENSA DE LICITAÇÃO">Dispensa de Licitação</option>
+          <option value="PREGÃO ELETRÔNICO">Pregão Eletrônico</option>
+        </select></div>
+        <div class="field"><label>Período (vigência)</label><input id="exPeriodo" placeholder="Ex: 2026/2027"></div>
+        <div class="field"><label>Qtd. cota principal</label><input id="exCotaP" type="number" min="0" value="0"></div>
+        <div class="field"><label>Qtd. cota reserva</label><input id="exCotaR" type="number" min="0" value="0"></div>
+        <div class="field"><label>Valor unitário (R$)</label><input id="exValor" type="number" min="0" step="0.01" value="0"></div>
+      </div>
+      <div style="margin-top:14px;"><button class="btn" onclick="addExame()">+ Adicionar exame</button></div>
+    </div>
+    ${findReplacePanel('exames', [
+      {key:'descricao',label:'Descrição'},{key:'laboratorio',label:'Laboratório'},{key:'convenio',label:'Convênio'},{key:'periodo',label:'Período'}
+    ], frMatchExames, 'frDeleteExames', 'frReplaceExames')}
+    <div class="card">
+      <div class="flexrow"><h2 class="sortable-title" style="margin:0;" onclick="sortExames()" title="Clique para colocar em ordem alfabética">Exames cadastrados <span class="sort-ic">⇅ A-Z</span></h2><input id="exFiltro" placeholder="Filtrar por descrição ou laboratório…" style="max-width:260px;padding:7px 10px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;" oninput="debouncedRender()"></div>
+      <div class="table-wrap" style="margin-top:10px;"><table>
+        <thead><tr><th>Status</th><th>Exame</th><th>Laboratório</th><th>Convênio</th><th>Período</th><th class="right">Cota Princ.</th><th class="right">Usada</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th><th></th></tr></thead>
+        <tbody>${renderExamesRows()}</tbody>
+      </table></div>
+    </div>
+  `;
+}
+function renderExamesRows(){
+  const filtro = (document.getElementById('exFiltro')?.value||'').toLowerCase();
+  let list = STATE.exames;
+  if(filtro) list = list.filter(e=> e.descricao.toLowerCase().includes(filtro) || e.laboratorio.toLowerCase().includes(filtro));
+  if(list.length===0) return `<tr class="empty-row"><td colspan="10">Nenhum exame encontrado.</td></tr>`;
+  return list.map(e=>{
+    const usada = usoCotaPrincipal(e.id);
+    return `<tr>
+      <td><span class="badge ${e.tipo==='ATIVO'?'ativo':'inativo'}">${e.tipo}</span></td>
+      <td><b>${esc(e.descricao)}</b></td>
+      <td>${esc(e.laboratorio)}</td>
+      <td>${esc(e.convenio)}</td>
+      <td>${esc(e.periodo)||'—'}</td>
+      <td class="right">${fmtNum(e.cotaPrincipal)}</td>
+      <td class="right">${fmtNum(usada)}</td>
+      <td class="right">${fmtNum(e.cotaReserva)}</td>
+      <td class="right">${fmtMoney(e.valorUnit)}</td>
+      <td><button class="btn ghost small" onclick="deleteExame('${e.id}')">🗑</button></td>
+    </tr>`;
+  }).join('');
+}
+function addExame(){
+  const descricao = document.getElementById('exDescricao').value.trim();
+  const laboratorio = document.getElementById('exLab').value;
+  if(!descricao){ showToast('Informe a descrição do exame.'); return; }
+  if(!laboratorio){ showToast('Cadastre e selecione um laboratório.'); return; }
+  STATE.exames.push({
+    id: uid(),
+    tipo: document.getElementById('exTipo').value,
+    descricao,
+    laboratorio,
+    convenio: document.getElementById('exConvenio').value,
+    periodo: document.getElementById('exPeriodo').value.trim(),
+    cotaPrincipal: Number(document.getElementById('exCotaP').value)||0,
+    cotaReserva: Number(document.getElementById('exCotaR').value)||0,
+    valorUnit: Number(document.getElementById('exValor').value)||0,
+  });
+  saveState(); render(); showToast('Exame adicionado.');
+}
+function deleteExame(id){
+  if(!confirm('Excluir este exame do cadastro?')) return;
+  STATE.exames = STATE.exames.filter(e=>e.id!==id);
+  saveState(); render();
+}
+function sortExames(){
+  // Apenas reordena a lista (A-Z pela descrição). Nenhum item é apagado ou alterado.
+  STATE.exames.sort((a,b)=> a.descricao.localeCompare(b.descricao, 'pt-BR', {sensitivity:'base'}));
+  saveState(); render(); showToast('Exames organizados em ordem alfabética.');
+}
+
+/* ============================================================
+   LANÇAMENTO DE EXAMES  (Compra Direta / Dispensa / Pregão)
+   ============================================================ */
+const CONV_TO_CADASTRO = {
+  COMPRADIRETA:'COMPRA DIRETA',
+  DISPENSA:'DISPENSA DE LICITAÇÃO',
+  PREGAO:'PREGÃO ELETRÔNICO',
+};
+function viewLancamento(){
+  const cadConv = CONV_TO_CADASTRO[lancTab];
+  const labsOpts = labsForSelect().map(l=>`<option value="${esc(l.nome)}">${esc(l.nome)}</option>`).join('');
+  const lancsTab = STATE.lancamentos.filter(l=>l.convenio===lancTab);
+  const totQtd = lancsTab.reduce((s,l)=>s+l.quantidade,0);
+  const totCP = lancsTab.reduce((s,l)=>s+l.qtdCP,0);
+  const totCR = lancsTab.reduce((s,l)=>s+l.qtdCR,0);
+  const totValor = lancsTab.reduce((s,l)=>s+l.valorTotal,0);
+
+  return `
+    <div class="tabs">
+      ${CONVENIOS.map(c=>`<div class="tab ${lancTab===c.key?'active':''}" onclick="setLancTab('${c.key}')">${c.label}</div>`).join('')}
+    </div>
+    <div class="helpbox">A cota <b>principal</b> é usada primeiro; quando ela esgota, os próximos lançamentos do mesmo exame passam a consumir a <b>cota reserva</b> automaticamente. Isso substitui o preenchimento manual de "Vlr. C.P." / "Vlr. C.R." da planilha.</div>
+    <div class="card">
+      <h2>Novo lançamento — ${convenioLabel(lancTab)}</h2>
+      <div class="subtitle">Competência: <b>${STATE.competencia.mes}/${STATE.competencia.ano}</b></div>
+      <div class="formgrid">
+        <div class="field"><label>Nome do paciente</label><input id="lcPaciente" placeholder="Nome completo"></div>
+        <div class="field"><label>Data</label><input id="lcData" type="datetime-local" value="${todayISO()}"></div>
+        <div class="field"><label>Unidade solicitante</label><input id="lcUnidade" placeholder="Ex: C. Diagnóstico"></div>
+        <div class="field"><label>Resultado disponível?</label><select id="lcResultado"><option value="NÃO">Não</option><option value="SIM">Sim</option></select></div>
+        <div class="field"><label>Laboratório</label><select id="lcLab" onchange="render()">${labsOpts || '<option value="">Cadastre um laboratório</option>'}</select></div>
+        <div class="field" style="grid-column:span 2;"><label>Exame</label><select id="lcExame">${examesOptsFor(cadConv, document.getElementById('lcLab')?.value)}</select></div>
+        <div class="field"><label>Quantidade</label><input id="lcQtd" type="number" min="1" value="1"></div>
+      </div>
+      <div style="margin-top:14px;"><button class="btn" onclick="addLancamento()">+ Lançar exame</button></div>
+    </div>
+
+    <div class="card">
+      <div class="flexrow">
+        <div>
+          <h2 style="margin:0;">Importar exames — ${convenioLabel(lancTab)}</h2>
+          <div class="subtitle" style="margin-bottom:0;">Importe uma lista de exames realizados a partir de uma planilha/arquivo (.xlsx, .csv, .docx ou .txt).</div>
+        </div>
+        <div>
+          <input type="file" id="importFile" accept=".xlsx,.xls,.csv,.docx,.txt" style="display:none" onchange="handleImportFile(event)">
+          <button class="btn" onclick="document.getElementById('importFile').click()">📥 Importar arquivo</button>
+        </div>
+      </div>
+      <div class="helpbox" style="margin-top:12px;">
+        O arquivo deve ter colunas como <b>Paciente, Data, Exame, Laboratório, Unidade, Resultado, Quantidade</b> (os nomes podem variar um pouco). Cada exame informado precisa já existir no <b>Cadastro de Exames</b> com o mesmo nome, laboratório e convênio desta aba (${convenioLabel(lancTab)}) — do contrário a linha será ignorada e listada no aviso ao final da importação.
+      </div>
+    </div>
+
+    ${findReplacePanel('lanc', [
+      {key:'exame',label:'Exame'},{key:'paciente',label:'Paciente'},{key:'laboratorio',label:'Laboratório'},{key:'unidade',label:'Unidade'}
+    ], frMatchLanc, 'frDeleteLanc', 'frReplaceLanc')}
+
+    <div class="card">
+      <div class="flexrow"><h2 style="margin:0;">Lançamentos — ${convenioLabel(lancTab)}</h2>
+        <button class="btn secondary small" onclick="exportCSV('${lancTab}')">⭳ Exportar CSV</button>
+      </div>
+      <div class="table-wrap" style="margin-top:10px;"><table>
+        <thead><tr><th>Paciente</th><th>Data</th><th>Exame</th><th>Laboratório</th><th>Unidade</th><th>Resultado</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Vlr. Unit.</th><th class="right">Vlr. Total</th><th></th></tr></thead>
+        <tbody>
+          ${lancsTab.length===0 ? `<tr class="empty-row"><td colspan="12">Nenhum lançamento nesta competência ainda.</td></tr>` :
+            lancsTab.map(l=>`<tr>
+              <td>${esc(l.paciente)}</td>
+              <td>${esc(l.data)}</td>
+              <td>${esc(l.exameDescricao)}</td>
+              <td>${esc(l.laboratorio)}</td>
+              <td>${esc(l.unidade)||'—'}</td>
+              <td>${esc(l.resultado)}</td>
+              <td class="right">${fmtNum(l.quantidade)}</td>
+              <td class="right">${fmtNum(l.qtdCP)}</td>
+              <td class="right">${fmtNum(l.qtdCR)}</td>
+              <td class="right">${fmtMoney(l.valorUnit)}</td>
+              <td class="right"><b>${fmtMoney(l.valorTotal)}</b></td>
+              <td><button class="btn ghost small" onclick="deleteLancamento('${l.id}')">🗑</button></td>
+            </tr>`).join('')}
+        </tbody>
+        ${lancsTab.length>0 ? `<tfoot><tr><td colspan="6">TOTAL GERAL</td><td class="right">${fmtNum(totQtd)}</td><td class="right">${fmtNum(totCP)}</td><td class="right">${fmtNum(totCR)}</td><td></td><td class="right">${fmtMoney(totValor)}</td><td></td></tr></tfoot>`:''}
+      </table></div>
+    </div>
+  `;
+}
+function examesOptsFor(cadConv, laboratorio){
+  const list = STATE.exames.filter(e=>e.tipo==='ATIVO' && e.convenio===cadConv && (!laboratorio || e.laboratorio===laboratorio));
+  if(list.length===0) return `<option value="">Nenhum exame ativo cadastrado para este laboratório/convênio</option>`;
+  return list.map(e=>`<option value="${e.id}">${esc(e.descricao)} (saldo: ${fmtNum(e.cotaPrincipal+e.cotaReserva-usoCotaPrincipal(e.id)-usoCotaReserva(e.id))})</option>`).join('');
+}
+function usoCotaReserva(exameId){
+  return STATE.lancamentos.filter(l=>l.exameId===exameId).reduce((s,l)=>s+l.qtdCR,0);
+}
+function setLancTab(t){ lancTab=t; render(); }
+function addLancamento(){
+  const paciente = document.getElementById('lcPaciente').value.trim();
+  const laboratorio = document.getElementById('lcLab').value;
+  const exameId = document.getElementById('lcExame').value;
+  const qtd = Number(document.getElementById('lcQtd').value)||0;
+  if(!paciente){ showToast('Informe o nome do paciente.'); return; }
+  if(!laboratorio){ showToast('Selecione um laboratório.'); return; }
+  if(!exameId){ showToast('Selecione um exame.'); return; }
+  if(qtd<=0){ showToast('Quantidade deve ser maior que zero.'); return; }
+  const exame = STATE.exames.find(e=>e.id===exameId);
+  if(!exame){ showToast('Exame inválido.'); return; }
+
+  const usadaCP = usoCotaPrincipal(exameId);
+  const restoCP = Math.max(exame.cotaPrincipal - usadaCP, 0);
+  const qtdCP = Math.min(qtd, restoCP);
+  const qtdCR = qtd - qtdCP;
+  const usadaCR = usoCotaReserva(exameId);
+  const restoCR = Math.max(exame.cotaReserva - usadaCR, 0);
+  if(qtdCR > restoCR){
+    if(!confirm(`Atenção: esse lançamento ultrapassa a cota reserva disponível para "${exame.descricao}" (restam ${restoCR}). Deseja lançar mesmo assim?`)) return;
+  }
+
+  STATE.lancamentos.push({
+    id: uid(),
+    convenio: lancTab,
+    laboratorio,
+    exameId,
+    exameDescricao: exame.descricao,
+    paciente,
+    data: document.getElementById('lcData').value.replace('T',' '),
+    unidade: document.getElementById('lcUnidade').value.trim(),
+    resultado: document.getElementById('lcResultado').value,
+    quantidade: qtd,
+    qtdCP, qtdCR,
+    valorUnit: exame.valorUnit,
+    valorTotal: qtd*exame.valorUnit,
+    competencia: STATE.competencia.mes, ano: STATE.competencia.ano,
+  });
+  saveState(); render(); showToast('Exame lançado com sucesso.');
+}
+function deleteLancamento(id){
+  STATE.lancamentos = STATE.lancamentos.filter(l=>l.id!==id);
+  saveState(); render();
+}
+function exportCSV(convenio){
+  const rows = STATE.lancamentos.filter(l=>l.convenio===convenio);
+  if(rows.length===0){ showToast('Nada para exportar.'); return; }
+  const header = ['Paciente','Data','Exame','Laboratorio','Unidade','Resultado','Quantidade','QtdCP','QtdCR','ValorUnit','ValorTotal'];
+  const lines = [header.join(';')].concat(rows.map(r=>[r.paciente,r.data,r.exameDescricao,r.laboratorio,r.unidade,r.resultado,r.quantidade,r.qtdCP,r.qtdCR,r.valorUnit,r.valorTotal].join(';')));
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download = `lancamentos_${convenio}_${STATE.competencia.mes}${STATE.competencia.ano}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ---------------- Importação de arquivos (xlsx / csv / docx / txt) ---------------- */
+function normHeader(h){
+  return String(h||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+}
+function extractField(rowObj, keywords){
+  for(const k in rowObj){
+    const nk = normHeader(k);
+    if(keywords.some(kw=>nk.includes(kw))) return rowObj[k];
+  }
+  return '';
+}
+function textToRows(text){
+  const lines = String(text).split(/\r?\n/).filter(l=>l.trim()!=='');
+  if(lines.length===0) return [];
+  const delim = lines[0].includes('\t') ? '\t' : (lines[0].includes(';') ? ';' : ',');
+  const headers = lines[0].split(delim).map(h=>h.trim());
+  return lines.slice(1).map(line=>{
+    const cells = line.split(delim);
+    const obj={}; headers.forEach((h,i)=>obj[h]=(cells[i]||'').trim()); return obj;
+  });
+}
+function parseCSVFile(file){
+  return new Promise((resolve,reject)=>{
+    Papa.parse(file, { header:true, skipEmptyLines:true, complete:(res)=>resolve(res.data), error:reject });
+  });
+}
+function parseXLSXFile(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = (evt)=>{
+      try{
+        const wb = XLSX.read(evt.target.result, {type:'array'});
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        resolve(XLSX.utils.sheet_to_json(sheet, {defval:''}));
+      }catch(err){ reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+function parseDOCXFile(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = (evt)=>{
+      mammoth.convertToHtml({arrayBuffer:evt.target.result}).then(result=>{
+        const doc = new DOMParser().parseFromString(result.value,'text/html');
+        const table = doc.querySelector('table');
+        if(!table){ resolve(textToRows(doc.body.textContent)); return; }
+        const trs = Array.from(table.querySelectorAll('tr'));
+        if(trs.length<2){ resolve([]); return; }
+        const headers = Array.from(trs[0].querySelectorAll('td,th')).map(td=>td.textContent.trim());
+        const rows = trs.slice(1).map(tr=>{
+          const cells = Array.from(tr.querySelectorAll('td,th')).map(td=>td.textContent.trim());
+          const obj={}; headers.forEach((h,i)=>obj[h]=cells[i]||''); return obj;
+        });
+        resolve(rows);
+      }).catch(reject);
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+function parseTXTFile(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = (evt)=>resolve(textToRows(evt.target.result));
+    reader.onerror = reject;
+    reader.readAsText(file, 'utf-8');
+  });
+}
+async function handleImportFile(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  try{
+    let rows = [];
+    if(ext==='csv') rows = await parseCSVFile(file);
+    else if(ext==='xlsx' || ext==='xls') rows = await parseXLSXFile(file);
+    else if(ext==='docx') rows = await parseDOCXFile(file);
+    else if(ext==='txt') rows = await parseTXTFile(file);
+    else { showToast('Formato não suportado. Use .xlsx, .csv, .docx ou .txt.'); return; }
+    importLancamentosFromRows(rows);
+  }catch(err){
+    console.error(err);
+    showToast('Erro ao ler o arquivo: '+err.message);
+  }
+  e.target.value = '';
+}
+function importLancamentosFromRows(rows){
+  if(!rows || rows.length===0){ showToast('Nenhuma linha reconhecida no arquivo.'); return; }
+  const cadConv = CONV_TO_CADASTRO[lancTab];
+  let importados = 0;
+  const ignorados = [];
+  rows.forEach(r=>{
+    const pacienteVal = String(extractField(r,['paciente','nome']) ?? '').trim();
+    const exameVal = String(extractField(r,['exame','descricao']) ?? '').trim();
+    const labVal = String(extractField(r,['laborat']) ?? '').trim();
+    const unidadeVal = String(extractField(r,['unidade']) ?? '').trim();
+    const resultadoVal = String(extractField(r,['resultado']) ?? 'NÃO').trim().toUpperCase();
+    const dataVal = String(extractField(r,['data']) ?? '').trim();
+    const qtdVal = Number(extractField(r,['quant','qtd'])) || 1;
+
+    if(!exameVal){ ignorados.push('(linha sem nome de exame)'); return; }
+
+    let exame = STATE.exames.find(e => e.tipo==='ATIVO' && e.convenio===cadConv &&
+      e.descricao.toLowerCase().trim()===exameVal.toLowerCase().trim() &&
+      (!labVal || e.laboratorio.toLowerCase()===labVal.toLowerCase()));
+    if(!exame){
+      exame = STATE.exames.find(e => e.tipo==='ATIVO' && e.convenio===cadConv &&
+        e.descricao.toLowerCase().includes(exameVal.toLowerCase()));
+    }
+    if(!exame){ ignorados.push(exameVal); return; }
+
+    const usadaCP = usoCotaPrincipal(exame.id);
+    const restoCP = Math.max(exame.cotaPrincipal - usadaCP, 0);
+    const qtdCP = Math.min(qtdVal, restoCP);
+    const qtdCR = qtdVal - qtdCP;
+
+    STATE.lancamentos.push({
+      id: uid(), convenio: lancTab, laboratorio: exame.laboratorio,
+      exameId: exame.id, exameDescricao: exame.descricao,
+      paciente: pacienteVal || '(não informado)',
+      data: dataVal || todayISO().replace('T',' '),
+      unidade: unidadeVal, resultado: resultadoVal==='SIM' ? 'SIM' : 'NÃO',
+      quantidade: qtdVal, qtdCP, qtdCR,
+      valorUnit: exame.valorUnit, valorTotal: qtdVal*exame.valorUnit,
+      competencia: STATE.competencia.mes, ano: STATE.competencia.ano,
+      importado: true,
+    });
+    importados++;
+  });
+
+  saveState(); render();
+  let msg = `Importação concluída: ${importados} lançamento(s) importado(s).`;
+  if(ignorados.length>0) msg += ` ${ignorados.length} linha(s) ignorada(s).`;
+  showToast(msg);
+  if(ignorados.length>0){
+    const uniq = [...new Set(ignorados)].slice(0,15);
+    alert('Algumas linhas não foram importadas porque o exame não foi encontrado no Cadastro de Exames (confira nome, laboratório e convênio):\n\n- '+uniq.join('\n- ')+(ignorados.length>15?'\n... e outras.':''));
+  }
+}
+
+/* ============================================================
+   EMISSÃO DE N.F.
+   ============================================================ */
+function viewNF(){
+  const cadConv = CONV_TO_CADASTRO[nfTab];
+  const labs = activeLabs();
+  return `
+    <div class="tabs">
+      ${CONVENIOS.map(c=>`<div class="tab ${nfTab===c.key?'active':''}" onclick="setNfTab('${c.key}')">${c.label}</div>`).join('')}
+    </div>
+    <div class="helpbox">Resumo por laboratório, pronto para solicitar a emissão da nota fiscal referente à competência <b>${STATE.competencia.mes}/${STATE.competencia.ano}</b>.</div>
+    <div class="grid cols-3">
+      ${labs.length===0 ? `<div class="card">Nenhum laboratório ativo cadastrado.</div>` :
+        labs.map(l=>nfCard(l.nome, nfTab, cadConv)).join('')}
+    </div>
+  `;
+}
+function nfCard(labName, convKey, cadConv){
+  const lancs = STATE.lancamentos.filter(l=>l.convenio===convKey && l.laboratorio===labName);
+  const qtdCP = lancs.reduce((s,l)=>s+l.qtdCP,0);
+  const valCP = lancs.reduce((s,l)=>s+l.qtdCP*l.valorUnit,0);
+  const qtdCR = lancs.reduce((s,l)=>s+l.qtdCR,0);
+  const valCR = lancs.reduce((s,l)=>s+l.qtdCR*l.valorUnit,0);
+  return `
+    <div class="card">
+      <h2>${esc(labName)}</h2>
+      <div class="subtitle">Favor emitir as seguintes notas fiscais — ${convenioLabel(convKey)}</div>
+      <table style="margin-top:6px;">
+        <tbody>
+          <tr><td style="border:none;padding:6px 0;">01 – Cota Principal</td><td class="right" style="border:none;">Qtd: <b>${fmtNum(qtdCP)}</b></td></tr>
+          <tr><td style="border:none;padding:0 0 10px;"></td><td class="right" style="border:none;padding:0 0 10px;">Valor: <b>${fmtMoney(valCP)}</b></td></tr>
+          <tr><td style="border:none;padding:6px 0;">02 – Cota Reserva</td><td class="right" style="border:none;">Qtd: <b>${fmtNum(qtdCR)}</b></td></tr>
+          <tr><td style="border:none;padding:0;"></td><td class="right" style="border:none;">Valor: <b>${fmtMoney(valCR)}</b></td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);display:flex;justify-content:space-between;">
+        <b>Total</b><b>${fmtMoney(valCP+valCR)}</b>
+      </div>
+    </div>
+  `;
+}
+function setNfTab(t){ nfTab=t; render(); }
+
+/* ============================================================
+   RELATÓRIOS / FECHAMENTO DE COMPETÊNCIA
+   ============================================================ */
+function viewRelatorios(){
+  const rows = STATE.historico.slice().sort((a,b)=> (a.ano-b.ano) || (MESES.indexOf(a.mes)-MESES.indexOf(b.mes)));
+  const totQtd = rows.reduce((s,r)=>s+r.qtdTotal,0);
+  const totValor = rows.reduce((s,r)=>s+r.valorTotal,0);
+  const atualTem = STATE.lancamentos.length>0;
+  return `
+    <div class="card">
+      <div class="flexrow">
+        <div>
+          <h2 style="margin:0;">Fechar competência atual</h2>
+          <div class="subtitle">Consolida os lançamentos de ${STATE.competencia.mes}/${STATE.competencia.ano} no histórico e libera a competência seguinte — substitui a macro "Criar Backup Interno" da planilha original.</div>
+        </div>
+        <button class="btn" ${atualTem?'':'disabled'} onclick="fecharCompetencia()">📦 Fechar ${STATE.competencia.mes}/${STATE.competencia.ano}</button>
+      </div>
+    </div>
+
+    ${viewRelatorioPersonalizado()}
+
+    <div class="section-title">Modelos prontos</div>
+    <div class="card">
+      <h2>Relatório 1 — Consolidado por competência</h2>
+      <div class="subtitle">Quantidade e valor por tipo de convênio/processo, por competência já fechada</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th><th class="right">Qtd C.Direta</th><th class="right">Vlr C.Direta</th><th class="right">Qtd Dispensa</th><th class="right">Vlr Dispensa</th><th class="right">Qtd Pregão</th><th class="right">Vlr Pregão</th><th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
+        <tbody>
+          ${rows.length===0 ? `<tr class="empty-row"><td colspan="11">Nenhuma competência fechada ainda.</td></tr>` :
+            rows.map(r=>`<tr>
+              <td><b>${esc(r.nomeBase)}</b></td><td>${r.mes}</td><td>${r.ano}</td>
+              <td class="right">${fmtNum(r.qtdCompraDireta)}</td><td class="right">${fmtMoney(r.valorCompraDireta)}</td>
+              <td class="right">${fmtNum(r.qtdDispensa)}</td><td class="right">${fmtMoney(r.valorDispensa)}</td>
+              <td class="right">${fmtNum(r.qtdPregao)}</td><td class="right">${fmtMoney(r.valorPregao)}</td>
+              <td class="right"><b>${fmtNum(r.qtdTotal)}</b></td><td class="right"><b>${fmtMoney(r.valorTotal)}</b></td>
+            </tr>`).join('')}
+        </tbody>
+        ${rows.length>0?`<tfoot><tr><td colspan="9">TOTAL GERAL (todos os períodos)</td><td class="right">${fmtNum(totQtd)}</td><td class="right">${fmtMoney(totValor)}</td></tr></tfoot>`:''}
+      </table></div>
+    </div>
+
+    <div class="card">
+      <h2>Relatório 2 — Por laboratório e tipo de convênio</h2>
+      <div class="subtitle">Detalha, para cada competência fechada, os 3 laboratórios que compõem o backup</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th><th>Laboratório</th><th class="right">Qtd C.Direta</th><th class="right">Vlr C.Direta</th><th class="right">Qtd Dispensa</th><th class="right">Vlr Dispensa</th><th class="right">Qtd Pregão</th><th class="right">Vlr Pregão</th><th class="right">Cota Princ.</th><th class="right">Cota Reser.</th><th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
+        <tbody>
+          ${rows.length===0 ? `<tr class="empty-row"><td colspan="14">Nenhuma competência fechada ainda.</td></tr>` :
+            rows.flatMap(r=> (r.porLaboratorio||[]).map(pl=>`<tr>
+              <td>${esc(r.nomeBase)}</td><td>${r.mes}</td><td>${r.ano}</td><td><b>${esc(pl.laboratorio)}</b></td>
+              <td class="right">${fmtNum(pl.qtdCompraDireta)}</td><td class="right">${fmtMoney(pl.valorCompraDireta)}</td>
+              <td class="right">${fmtNum(pl.qtdDispensa)}</td><td class="right">${fmtMoney(pl.valorDispensa)}</td>
+              <td class="right">${fmtNum(pl.qtdPregao)}</td><td class="right">${fmtMoney(pl.valorPregao)}</td>
+              <td class="right">${fmtNum(pl.qtdCP)}</td><td class="right">${fmtNum(pl.qtdCR)}</td>
+              <td class="right"><b>${fmtNum(pl.qtdTotal)}</b></td><td class="right"><b>${fmtMoney(pl.valorTotal)}</b></td>
+            </tr>`)).join('')}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+function fecharCompetencia(){
+  if(STATE.lancamentos.length===0){ showToast('Não há lançamentos para fechar.'); return; }
+  if(!confirm(`Fechar a competência ${STATE.competencia.mes}/${STATE.competencia.ano}? Os lançamentos atuais serão movidos para o histórico e a lista de lançamentos ficará vazia para a próxima competência.`)) return;
+
+  const totals = computeCompetenciaTotals(STATE.lancamentos);
+  const porLaboratorio = labsForSelect().map(l=>{
+    const t = computeCompetenciaTotals(STATE.lancamentos.filter(x=>x.laboratorio===l.nome));
+    const qtdCP = STATE.lancamentos.filter(x=>x.laboratorio===l.nome).reduce((s,x)=>s+x.qtdCP,0);
+    const qtdCR = STATE.lancamentos.filter(x=>x.laboratorio===l.nome).reduce((s,x)=>s+x.qtdCR,0);
+    return { laboratorio:l.nome, ...t, qtdCP, qtdCR };
+  }).filter(pl=>pl.qtdTotal>0);
+
+  const nomeBase = 'BACKUP'+STATE.competencia.mes+String(STATE.competencia.ano).slice(2);
+  STATE.historico.push({
+    id: uid(), nomeBase, mes: STATE.competencia.mes, ano: STATE.competencia.ano,
+    ...totals, porLaboratorio,
+    lancamentos: JSON.parse(JSON.stringify(STATE.lancamentos)), // snapshot detalhado p/ relatórios personalizados
+  });
+  STATE.lancamentos = [];
+
+  // avança a competência para o próximo mês
+  const idx = MESES.indexOf(STATE.competencia.mes);
+  if(idx===11){ STATE.competencia = {mes:MESES[0], ano:STATE.competencia.ano+1}; }
+  else { STATE.competencia = {mes:MESES[idx+1], ano:STATE.competencia.ano}; }
+
+  saveState(); render(); showToast('Competência fechada e arquivada no histórico.');
+}
+
+/* ---------------- Relatório personalizado (com filtros) ---------------- */
+let customReportState = { lab:'TODOS', convenio:'TODOS', mes:'TODOS', ano:'TODOS', cota:'TODOS', termo:'' };
+let reportSubTab = 'detalhado';
+function crSet(key,val){ customReportState[key]=val; }
+
+/* Todos os lançamentos, do período atual + de todas as competências já fechadas (snapshot) */
+function allLancamentosAllTime(){
+  const hist = STATE.historico.flatMap(h => (h.lancamentos||[]).map(l=>({...l})));
+  return hist.concat(STATE.lancamentos.map(l=>({...l})));
+}
+function availableLabsInData(){
+  const set = new Set(STATE.labs.map(l=>l.nome));
+  allLancamentosAllTime().forEach(l=>set.add(l.laboratorio));
+  return Array.from(set).filter(Boolean).sort();
+}
+function availableYearsInData(){
+  const set = new Set(allLancamentosAllTime().map(l=>l.ano));
+  set.add(STATE.competencia.ano);
+  return Array.from(set).sort((a,b)=>a-b);
+}
+function customReportFiltered(){
+  const f = customReportState;
+  let rows = allLancamentosAllTime();
+  if(f.lab!=='TODOS') rows = rows.filter(r=>r.laboratorio===f.lab);
+  if(f.convenio!=='TODOS') rows = rows.filter(r=>r.convenio===f.convenio);
+  if(f.mes!=='TODOS') rows = rows.filter(r=>r.competencia===f.mes);
+  if(f.ano!=='TODOS') rows = rows.filter(r=>String(r.ano)===String(f.ano));
+  if(f.termo.trim()){
+    const t = f.termo.toLowerCase();
+    rows = rows.filter(r=> (r.exameDescricao||'').toLowerCase().includes(t) || (r.paciente||'').toLowerCase().includes(t));
+  }
+  rows = rows.map(r=>{
+    let qtdExibida=r.quantidade, valorExibido=r.valorTotal;
+    if(f.cota==='CP'){ qtdExibida=r.qtdCP; valorExibido=r.qtdCP*r.valorUnit; }
+    else if(f.cota==='CR'){ qtdExibida=r.qtdCR; valorExibido=r.qtdCR*r.valorUnit; }
+    return {...r, qtdExibida, valorExibido};
+  });
+  if(f.cota!=='TODOS') rows = rows.filter(r=>r.qtdExibida>0);
+  return rows;
+}
+function viewRelatorioPersonalizado(){
+  const f = customReportState;
+  const rows = customReportFiltered();
+  const totQtd = rows.reduce((s,r)=>s+r.qtdExibida,0);
+  const totValor = rows.reduce((s,r)=>s+r.valorExibido,0);
+  const labsOpts = availableLabsInData().map(l=>`<option value="${esc(l)}" ${f.lab===l?'selected':''}>${esc(l)}</option>`).join('');
+  const anosOpts = availableYearsInData().map(a=>`<option value="${a}" ${String(f.ano)===String(a)?'selected':''}>${a}</option>`).join('');
+
+  return `
+  <div class="card">
+    <h2>🧩 Relatório personalizado</h2>
+    <div class="subtitle">Monte o relatório do jeito que você precisar: filtre por laboratório, tipo de convênio, mês, ano, tipo de cota, ou busque por exame/paciente — funciona também sobre as competências já fechadas.</div>
+    <div class="formgrid" style="grid-template-columns:repeat(6,1fr);">
+      <div class="field"><label>Laboratório</label><select onchange="crSet('lab',this.value);render();">
+        <option value="TODOS" ${f.lab==='TODOS'?'selected':''}>Todos</option>${labsOpts}
+      </select></div>
+      <div class="field"><label>Convênio</label><select onchange="crSet('convenio',this.value);render();">
+        <option value="TODOS" ${f.convenio==='TODOS'?'selected':''}>Todos</option>
+        ${CONVENIOS.map(c=>`<option value="${c.key}" ${f.convenio===c.key?'selected':''}>${c.label}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Mês</label><select onchange="crSet('mes',this.value);render();">
+        <option value="TODOS" ${f.mes==='TODOS'?'selected':''}>Todos</option>
+        ${MESES.map(m=>`<option value="${m}" ${f.mes===m?'selected':''}>${m}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Ano</label><select onchange="crSet('ano',this.value);render();">
+        <option value="TODOS" ${f.ano==='TODOS'?'selected':''}>Todos</option>${anosOpts}
+      </select></div>
+      <div class="field"><label>Tipo de cota</label><select onchange="crSet('cota',this.value);render();">
+        <option value="TODOS" ${f.cota==='TODOS'?'selected':''}>Todas</option>
+        <option value="CP" ${f.cota==='CP'?'selected':''}>Cota Principal</option>
+        <option value="CR" ${f.cota==='CR'?'selected':''}>Cota Reserva</option>
+      </select></div>
+      <div class="field"><label>Buscar exame/paciente</label><input value="${esc(f.termo)}" placeholder="Ex: Hemograma / João" oninput="crSet('termo',this.value);debouncedRender();"></div>
+    </div>
+
+    <div class="tabs" style="margin-top:14px;">
+      <div class="tab ${reportSubTab==='detalhado'?'active':''}" onclick="reportSubTab='detalhado';render();">📄 Detalhado</div>
+      <div class="tab ${reportSubTab==='porExame'?'active':''}" onclick="reportSubTab='porExame';render();">🧾 Por Exame</div>
+      <div class="tab ${reportSubTab==='porPaciente'?'active':''}" onclick="reportSubTab='porPaciente';render();">🙍 Por Paciente</div>
+      <div class="tab ${reportSubTab==='porLab'?'active':''}" onclick="reportSubTab='porLab';render();">🏥 Por Laboratório</div>
+      <div class="tab ${reportSubTab==='porMes'?'active':''}" onclick="reportSubTab='porMes';render();">📅 Por Mês/Competência</div>
+      <div class="tab ${reportSubTab==='porConvenio'?'active':''}" onclick="reportSubTab='porConvenio';render();">📁 Por Convênio</div>
+    </div>
+
+    <div class="flexrow" style="margin:10px 0;">
+      <div class="muted" style="font-size:12px;">${fmtNum(rows.length)} registro(s) encontrados · Qtd: <b>${fmtNum(totQtd)}</b> · Valor: <b>${fmtMoney(totValor)}</b></div>
+      <button class="btn secondary small" onclick="exportCustomReportCSV()">⭳ Exportar CSV</button>
+    </div>
+
+    ${renderCustomReportTable(rows)}
+  </div>`;
+}
+function groupKeyFn(){
+  if(reportSubTab==='porExame') return r=>r.exameDescricao||'(sem exame)';
+  if(reportSubTab==='porPaciente') return r=>r.paciente||'(sem paciente)';
+  if(reportSubTab==='porLab') return r=>r.laboratorio||'(sem laboratório)';
+  if(reportSubTab==='porMes') return r=>r.competencia+'/'+r.ano;
+  if(reportSubTab==='porConvenio') return r=>convenioLabel(r.convenio);
+  return null;
+}
+function groupColLabel(){
+  return {porExame:'Exame', porPaciente:'Paciente', porLab:'Laboratório', porMes:'Competência', porConvenio:'Convênio'}[reportSubTab] || '';
+}
+function groupRows(rows){
+  const keyFn = groupKeyFn();
+  const map = new Map();
+  rows.forEach(r=>{
+    const k = keyFn(r);
+    if(!map.has(k)) map.set(k,{qtd:0,qtdCP:0,qtdCR:0,valor:0,registros:0});
+    const g = map.get(k);
+    g.qtd+=r.qtdExibida; g.qtdCP+=r.qtdCP; g.qtdCR+=r.qtdCR; g.valor+=r.valorExibido; g.registros++;
+  });
+  return Array.from(map.entries()).map(([chave,v])=>({chave,...v})).sort((a,b)=>b.valor-a.valor);
+}
+function renderCustomReportTable(rows){
+  if(rows.length===0) return `<div class="helpbox">Nenhum registro encontrado para os filtros selecionados.</div>`;
+  if(reportSubTab==='detalhado'){
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Competência</th><th>Convênio</th><th>Laboratório</th><th>Paciente</th><th>Exame</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Vlr Unit.</th><th class="right">Valor</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td>${esc(r.competencia)}/${esc(r.ano)}</td><td><span class="badge ${convenioBadge(r.convenio)}">${convenioLabel(r.convenio)}</span></td>
+        <td>${esc(r.laboratorio)}</td><td>${esc(r.paciente)}</td><td>${esc(r.exameDescricao)}</td>
+        <td class="right">${fmtNum(r.qtdExibida)}</td><td class="right">${fmtNum(r.qtdCP)}</td><td class="right">${fmtNum(r.qtdCR)}</td>
+        <td class="right">${fmtMoney(r.valorUnit)}</td><td class="right"><b>${fmtMoney(r.valorExibido)}</b></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+  const list = groupRows(rows);
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>${groupColLabel()}</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
+    <tbody>${list.map(g=>`<tr><td><b>${esc(g.chave)}</b></td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td><td class="right">${fmtNum(g.qtdCP)}</td><td class="right">${fmtNum(g.qtdCR)}</td><td class="right"><b>${fmtMoney(g.valor)}</b></td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+function exportCustomReportCSV(){
+  const rows = customReportFiltered();
+  if(rows.length===0){ showToast('Nada para exportar.'); return; }
+  let lines;
+  if(reportSubTab==='detalhado'){
+    lines = [['Competencia','Ano','Convenio','Laboratorio','Paciente','Exame','Qtd','QtdCP','QtdCR','ValorUnit','Valor'].join(';')]
+      .concat(rows.map(r=>[r.competencia,r.ano,convenioLabel(r.convenio),r.laboratorio,r.paciente,r.exameDescricao,r.qtdExibida,r.qtdCP,r.qtdCR,r.valorUnit,r.valorExibido].join(';')));
+  } else {
+    const list = groupRows(rows);
+    lines = [[groupColLabel(),'Registros','Qtd','QtdCP','QtdCR','Valor'].join(';')]
+      .concat(list.map(g=>[g.chave,g.registros,g.qtd,g.qtdCP,g.qtdCR,g.valor].join(';')));
+  }
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=`relatorio_personalizado_${reportSubTab}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ---------------- Competência editor ---------------- */
+function openCompetenciaEditor(){
+  const mes = prompt('Mês da competência atual:', STATE.competencia.mes);
+  if(!mes) return;
+  const mesUpper = mes.toUpperCase().trim();
+  if(!MESES.includes(mesUpper)){ showToast('Mês inválido. Use: '+MESES.join(', ')); return; }
+  const ano = prompt('Ano da competência atual:', STATE.competencia.ano);
+  if(!ano || isNaN(Number(ano))) return;
+  STATE.competencia = { mes: mesUpper, ano: Number(ano) };
+  saveState(); render(); showToast('Competência atualizada.');
+}
+
+/* ---------------- Backup: Exportar / Importar todos os dados ---------------- */
+function exportAllData(){
+  const payload = {
+    _tipo: 'backup-controle-exames-laboratoriais',
+    _exportadoEm: new Date().toISOString(),
+    dados: STATE
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const dataAtual = new Date().toISOString().slice(0,10);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `backup_controle_exames_${dataAtual}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Backup exportado! Guarde este arquivo para importar em uma próxima versão.');
+}
+function importAllData(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    let payload;
+    try{
+      payload = JSON.parse(e.target.result);
+    }catch(err){
+      alert('Não foi possível ler este arquivo. Verifique se é um backup exportado por este sistema (.json).');
+      event.target.value = '';
+      return;
+    }
+    const dados = payload && payload.dados ? payload.dados : payload;
+    if(!dados || (!dados.labs && !dados.exames && !dados.lancamentos)){
+      alert('Este arquivo não parece ser um backup válido do Controle de Exames Laboratoriais.');
+      event.target.value = '';
+      return;
+    }
+    const temDadosAtuais = (STATE.labs && STATE.labs.length) || (STATE.exames && STATE.exames.length) || (STATE.lancamentos && STATE.lancamentos.length);
+    if(temDadosAtuais){
+      if(!confirm('Já existem dados cadastrados nesta versão. Importar o backup vai SUBSTITUIR todos os dados atuais pelos dados do arquivo. Deseja continuar?')) {
+        event.target.value = '';
+        return;
+      }
+    }
+    STATE = Object.assign({}, STATE, dados);
+    saveState();
+    renderNav();
+    render();
+    event.target.value = '';
+    showToast('Dados importados com sucesso!');
+  };
+  reader.readAsText(file);
+}
+
+/* ---------------- Boot ---------------- */
+document.getElementById('menuBtn').addEventListener('click', ()=>{
+  document.getElementById('sidebar').classList.toggle('open');
+});
+
+(async function init(){
+  await loadState();
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  goto('dashboard');
+})();
+</script>
+</body>
+</html>
