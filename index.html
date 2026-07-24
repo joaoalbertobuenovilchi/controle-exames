@@ -8,6 +8,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
 :root{
   --bg:#F4F7F7;
@@ -151,6 +153,32 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 
 <div class="loading-screen" id="loadingScreen"><div class="spinner"></div>Carregando dados…</div>
 
+<div id="configScreen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:300;display:none;align-items:center;justify-content:center;padding:20px;">
+  <div class="card" style="max-width:520px;width:100%;">
+    <h2>⚙️ Configurar backend (Firebase)</h2>
+    <div class="subtitle">Este sistema ainda não foi conectado a um backend próprio. Preencha as credenciais do seu projeto Firebase abaixo (você só faz isso uma vez, direto no código-fonte do arquivo).</div>
+    <div class="helpbox">
+      As credenciais ficam gravadas no objeto <code>firebaseConfig</code> logo no início do &lt;script&gt;. Edite o arquivo .html, cole os valores do seu projeto Firebase e salve. Depois é só abrir novamente.
+    </div>
+  </div>
+</div>
+
+<div id="accessCodeScreen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:250;align-items:center;justify-content:center;padding:20px;">
+  <div class="card" style="max-width:460px;width:100%;">
+    <h2>🔐 Código de acesso</h2>
+    <div class="subtitle">Use o mesmo código em todos os computadores (inclusive home office) para acessar os mesmos dados na nuvem.</div>
+    <div class="field" style="margin-bottom:12px;">
+      <label>Código da equipe/setor</label>
+      <input type="text" id="accessCodeInput" placeholder="Ex.: farmacia-jaborandi-2026" autocomplete="off">
+    </div>
+    <div class="flexrow" style="gap:8px;">
+      <button class="btn" style="flex:1;" onclick="submitAccessCode()">Entrar</button>
+      <button class="btn secondary" onclick="generateAccessCode()">Gerar código novo</button>
+    </div>
+    <div class="muted" style="font-size:11.5px;margin-top:10px;">Guarde este código em local seguro. Quem tiver o código consegue ver e editar estes dados.</div>
+  </div>
+</div>
+
 <div id="app" style="display:none;">
   <aside class="sidebar" id="sidebar">
     <div class="brand">
@@ -162,7 +190,8 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
     </div>
     <nav class="navlist" id="navlist"></nav>
     <div class="side-footer">
-      Seus dados ficam salvos automaticamente na nuvem, vinculados à sua conta. Acesse este mesmo link de qualquer computador — inclusive do home office — para continuar de onde parou.
+      Seus dados ficam salvos automaticamente na nuvem (Firebase), vinculados ao seu código de acesso. Use o mesmo código em qualquer computador — inclusive do home office — para continuar de onde parou.
+      <div style="margin-top:6px;"><a href="#" onclick="trocarCodigoAcesso();return false;" style="color:#fff;opacity:.85;">Trocar código de acesso</a></div>
     </div>
   </aside>
 
@@ -195,10 +224,64 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
    mesmos conceitos: Cadastro de Laboratórios, Cadastro de Exames,
    Lançamento por tipo de convênio (Compra Direta / Dispensa /
    Pregão), Emissão de N.F., Dashboard e Relatórios consolidados.
-   Os dados ficam salvos na nuvem (por usuário) via window.storage,
-   substituindo as macros/backups internos do Excel por um botão
-   de "Fechar Competência".
+   Os dados ficam salvos na nuvem via backend próprio (Firebase
+   Firestore), substituindo as macros/backups internos do Excel
+   por um botão de "Fechar Competência".
    ============================================================ */
+
+/* ============================================================
+   CONFIGURAÇÃO DO FIREBASE — PREENCHA COM OS DADOS DO SEU PROJETO
+   1) Crie um projeto gratuito em https://console.firebase.google.com
+   2) Ative o "Firestore Database" (modo produção)
+   3) Em "Configurações do projeto" > "Geral", crie um app da Web
+      e copie o objeto de configuração para cá.
+   4) Nas Regras do Firestore, cole as regras sugeridas no manual
+      de instalação (arquivo INSTRUCOES_BACKEND.md).
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyC2YzQ55pfE_kIpG_aN6iJu3p3C2fq5NGQ",
+  authDomain: "controle-exames-jaborandi.firebaseapp.com",
+  projectId: "controle-exames-jaborandi",
+  storageBucket: "controle-exames-jaborandi.firebasestorage.app",
+  messagingSenderId: "316461142720",
+  appId: "1:316461142720:web:2033d20b72966a2793d325"
+};
+
+let db = null;
+let firebaseOk = false;
+try{
+  if(firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf('COLE_AQUI')===-1){
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    firebaseOk = true;
+  }
+}catch(e){ console.error('Falha ao iniciar Firebase:', e); firebaseOk=false; }
+
+const FIRESTORE_COLLECTION = 'controle_exames_laboratoriais';
+
+/* ---------------- Código de acesso (sincroniza entre computadores) ---------------- */
+function getAccessCode(){ return localStorage.getItem('cel_access_code') || ''; }
+function setAccessCode(code){ localStorage.setItem('cel_access_code', code); }
+function slugifyCode(v){ return v.trim().toLowerCase().replace(/[^a-z0-9\-_.]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,''); }
+function generateAccessCode(){
+  const rand = Math.random().toString(36).slice(2,8) + Math.random().toString(36).slice(2,6);
+  document.getElementById('accessCodeInput').value = 'jaborandi-' + rand;
+  showToast('Código sugerido gerado. Confira e clique em Entrar.');
+}
+function submitAccessCode(){
+  const raw = document.getElementById('accessCodeInput').value;
+  const code = slugifyCode(raw);
+  if(!code || code.length < 6){ alert('Digite um código com pelo menos 6 caracteres.'); return; }
+  setAccessCode(code);
+  document.getElementById('accessCodeScreen').style.display = 'none';
+  document.getElementById('loadingScreen').style.display = 'flex';
+  bootAfterAccessCode();
+}
+function trocarCodigoAcesso(){
+  if(!confirm('Deseja trocar de código de acesso? Você sairá dos dados atuais e poderá entrar com outro código.')) return;
+  localStorage.removeItem('cel_access_code');
+  location.reload();
+}
 
 const MESES = ["JANEIRO","FEVEREIRO","MARÇO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"];
 const CONVENIOS = [
@@ -219,23 +302,45 @@ let currentView = "dashboard";
 let lancTab = "COMPRADIRETA";
 let nfTab = "COMPRADIRETA";
 
-/* ---------------- Storage ---------------- */
+/* ---------------- Storage (Firebase Firestore) ---------------- */
 async function loadState(){
+  if(!firebaseOk){ return; }
+  const code = getAccessCode();
+  if(!code) return;
   try{
-    const res = await window.storage.get('app-data', false);
-    if(res && res.value){
-      const parsed = JSON.parse(res.value);
-      STATE = Object.assign(STATE, parsed);
+    const doc = await db.collection(FIRESTORE_COLLECTION).doc(code).get();
+    if(doc.exists){
+      const dados = doc.data();
+      if(dados && dados.payload){
+        const parsed = JSON.parse(dados.payload);
+        STATE = Object.assign(STATE, parsed);
+      }
     }
-  }catch(e){ /* first run: no data yet */ }
+  }catch(e){
+    console.error(e);
+    showToast('Não foi possível carregar os dados da nuvem. Verifique sua conexão.');
+  }
 }
 let saveTimer = null;
+let saving = false;
 function saveState(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
+    if(!firebaseOk){ showToast('Backend não configurado. Veja INSTRUCOES_BACKEND.md.'); return; }
+    const code = getAccessCode();
+    if(!code) return;
+    saving = true;
     try{
-      await window.storage.set('app-data', JSON.stringify(STATE), false);
-    }catch(e){ showToast('Erro ao salvar dados na nuvem.'); console.error(e); }
+      await db.collection(FIRESTORE_COLLECTION).doc(code).set({
+        payload: JSON.stringify(STATE),
+        atualizadoEm: new Date().toISOString()
+      });
+    }catch(e){
+      showToast('Erro ao salvar dados na nuvem.');
+      console.error(e);
+    }finally{
+      saving = false;
+    }
   }, 250);
 }
 
@@ -1332,11 +1437,26 @@ document.getElementById('menuBtn').addEventListener('click', ()=>{
   document.getElementById('sidebar').classList.toggle('open');
 });
 
-(async function init(){
+async function bootAfterAccessCode(){
   await loadState();
   document.getElementById('loadingScreen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   goto('dashboard');
+}
+
+(function init(){
+  if(!firebaseOk){
+    document.getElementById('loadingScreen').style.display = 'none';
+    document.getElementById('configScreen').style.display = 'flex';
+    return;
+  }
+  const code = getAccessCode();
+  if(!code){
+    document.getElementById('loadingScreen').style.display = 'none';
+    document.getElementById('accessCodeScreen').style.display = 'flex';
+    return;
+  }
+  bootAfterAccessCode();
 })();
 </script>
 </body>
