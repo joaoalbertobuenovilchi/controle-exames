@@ -147,6 +147,14 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 .section-title{font-size:16px;font-weight:800;margin:26px 0 10px;color:var(--teal-dark);}
 .muted{color:var(--ink-soft);}
 .right{text-align:right;}
+
+/* Cabeçalho padrão dos relatórios */
+.report-header{border:1px solid var(--line);border-radius:var(--radius);background:var(--teal-soft);padding:14px 18px;margin-bottom:14px;}
+.report-header .rh-prefeitura{font-size:14px;font-weight:800;color:var(--teal-dark);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #CFE7E5;}
+.report-header .rh-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px 16px;}
+@media(max-width:900px){.report-header .rh-grid{grid-template-columns:repeat(2,1fr);}}
+.report-header .rh-item span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:700;margin-bottom:2px;}
+.report-header .rh-item b{font-size:12.5px;color:var(--ink);}
 </style>
 </head>
 <body>
@@ -351,6 +359,46 @@ function fmtNum(v){ return (Number(v)||0).toLocaleString('pt-BR'); }
 function todayISO(){ const d=new Date(); return d.toISOString().slice(0,16); }
 function convenioLabel(key){ return (CONVENIOS.find(c=>c.key===key)||{}).label || key; }
 function convenioBadge(key){ return (CONVENIOS.find(c=>c.key===key)||{}).badge || ''; }
+
+/* ---------------- Cabeçalho padrão dos relatórios ---------------- */
+const PREFEITURA_NOME = 'Prefeitura Municipal de Jaborandi';
+function pad2(n){ return String(n).padStart(2,'0'); }
+/* Ex.: "01/07/2026 A 31/07/2026" */
+function competenciaRange(mes, ano){
+  const idx = MESES.indexOf(mes);
+  if(idx<0 || !ano) return '—';
+  const lastDay = new Date(Number(ano), idx+1, 0).getDate();
+  const mm = pad2(idx+1);
+  return `${pad2(1)}/${mm}/${ano} A ${pad2(lastDay)}/${mm}/${ano}`;
+}
+/* Ex.: "JULHO/2026 - 01/07/2026 A 31/07/2026" */
+function competenciaLabel(mes, ano){
+  if(!mes || !ano) return '—';
+  return `${mes}/${ano} - ${competenciaRange(mes, ano)}`;
+}
+/* Período de vigência cadastrado nos exames do laboratório para o convênio informado */
+function vigenciaFor(laboratorio, convenioCadastro){
+  const periodos = [...new Set(STATE.exames
+    .filter(e => e.laboratorio===laboratorio && e.convenio===convenioCadastro && e.periodo)
+    .map(e => e.periodo.trim())
+    .filter(Boolean))];
+  return periodos.length ? periodos.join(' / ') : '—';
+}
+/* Monta o bloco de cabeçalho padrão: Prefeitura, Convênio, Laboratório, Vigência e Competência */
+function reportHeaderHTML({convenio, laboratorio, vigencia, competenciaText, mes, ano}){
+  const compTxt = competenciaText || competenciaLabel(mes, ano);
+  return `
+    <div class="report-header">
+      <div class="rh-prefeitura">🏛️ ${esc(PREFEITURA_NOME)}</div>
+      <div class="rh-grid">
+        <div class="rh-item"><span>Convênio</span><b>${esc(convenio || '—')}</b></div>
+        <div class="rh-item"><span>Laboratório</span><b>${esc(laboratorio || '—')}</b></div>
+        <div class="rh-item"><span>Vigência</span><b>${esc(vigencia || '—')}</b></div>
+        <div class="rh-item"><span>Competência</span><b>${esc(compTxt)}</b></div>
+      </div>
+    </div>
+  `;
+}
 function showToast(msg){
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
@@ -1109,6 +1157,12 @@ function nfCard(labName, convKey, cadConv){
   const valCR = lancs.reduce((s,l)=>s+l.qtdCR*l.valorUnit,0);
   return `
     <div class="card">
+      ${reportHeaderHTML({
+        convenio: convenioLabel(convKey),
+        laboratorio: labName,
+        vigencia: vigenciaFor(labName, cadConv),
+        mes: STATE.competencia.mes, ano: STATE.competencia.ano
+      })}
       <h2>${esc(labName)}</h2>
       <div class="subtitle">Favor emitir as seguintes notas fiscais — ${convenioLabel(convKey)}</div>
       <table style="margin-top:6px;">
@@ -1152,6 +1206,7 @@ function viewRelatorios(){
     <div class="card">
       <h2>Relatório 1 — Consolidado por competência</h2>
       <div class="subtitle">Quantidade e valor por tipo de convênio/processo, por competência já fechada</div>
+      ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:'Todos os laboratórios', vigencia:'—', competenciaText:'Consolidado de todas as competências fechadas'})}
       <div class="table-wrap"><table>
         <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th><th class="right">Qtd C.Direta</th><th class="right">Vlr C.Direta</th><th class="right">Qtd Dispensa</th><th class="right">Vlr Dispensa</th><th class="right">Qtd Pregão</th><th class="right">Vlr Pregão</th><th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
         <tbody>
@@ -1171,6 +1226,7 @@ function viewRelatorios(){
     <div class="card">
       <h2>Relatório 2 — Por laboratório e tipo de convênio</h2>
       <div class="subtitle">Detalha, para cada competência fechada, os 3 laboratórios que compõem o backup</div>
+      ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:'Todos os laboratórios', vigencia:'—', competenciaText:'Consolidado de todas as competências fechadas'})}
       <div class="table-wrap"><table>
         <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th><th>Laboratório</th><th class="right">Qtd C.Direta</th><th class="right">Vlr C.Direta</th><th class="right">Qtd Dispensa</th><th class="right">Vlr Dispensa</th><th class="right">Qtd Pregão</th><th class="right">Vlr Pregão</th><th class="right">Cota Princ.</th><th class="right">Cota Reser.</th><th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
         <tbody>
@@ -1264,10 +1320,16 @@ function viewRelatorioPersonalizado(){
   const labsOpts = availableLabsInData().map(l=>`<option value="${esc(l)}" ${f.lab===l?'selected':''}>${esc(l)}</option>`).join('');
   const anosOpts = availableYearsInData().map(a=>`<option value="${a}" ${String(f.ano)===String(a)?'selected':''}>${a}</option>`).join('');
 
+  const convenioTxt = f.convenio==='TODOS' ? 'Todos os convênios' : convenioLabel(f.convenio);
+  const labTxt = f.lab==='TODOS' ? 'Todos os laboratórios' : f.lab;
+  const vigenciaTxt = (f.lab!=='TODOS' && f.convenio!=='TODOS') ? vigenciaFor(f.lab, CONV_TO_CADASTRO[f.convenio]) : '—';
+  const compTxt = (f.mes!=='TODOS' && f.ano!=='TODOS') ? competenciaLabel(f.mes, f.ano) : 'Todos os períodos';
+
   return `
   <div class="card">
     <h2>🧩 Relatório personalizado</h2>
     <div class="subtitle">Monte o relatório do jeito que você precisar: filtre por laboratório, tipo de convênio, mês, ano, tipo de cota, ou busque por exame/paciente — funciona também sobre as competências já fechadas.</div>
+    ${reportHeaderHTML({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt})}
     <div class="formgrid" style="grid-template-columns:repeat(6,1fr);">
       <div class="field"><label>Laboratório</label><select onchange="crSet('lab',this.value);render();">
         <option value="TODOS" ${f.lab==='TODOS'?'selected':''}>Todos</option>${labsOpts}
