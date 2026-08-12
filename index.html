@@ -1007,8 +1007,16 @@ function exportCSV(convenio){
     competenciaText: competenciaLabel(STATE.competencia.mes, STATE.competencia.ano)
   });
   const header = ['Paciente','Data','Exame','Laboratorio','Unidade','Resultado','Quantidade','QtdCP','QtdCR','ValorUnit','ValorTotal'];
-  const lines = headerBlock.concat([header.join(';')]).concat(rows.map(r=>[r.paciente,r.data,r.exameDescricao,r.laboratorio,r.unidade,r.resultado,r.quantidade,r.qtdCP,r.qtdCR,r.valorUnit,r.valorTotal].join(';')));
-  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const dataLines = rows.map(r=>[
+    csvEsc(r.paciente), csvEsc(r.data), csvEsc(r.exameDescricao), csvEsc(r.laboratorio), csvEsc(r.unidade), csvEsc(r.resultado),
+    r.quantidade, r.qtdCP, r.qtdCR, csvEsc(fmtMoney(r.valorUnit)), csvEsc(fmtMoney(r.valorTotal))
+  ].join(';'));
+  const totalRow = ['TOTAL','','','','','',
+    rows.reduce((s,r)=>s+r.quantidade,0), rows.reduce((s,r)=>s+r.qtdCP,0), rows.reduce((s,r)=>s+r.qtdCR,0),
+    '', csvEsc(fmtMoney(rows.reduce((s,r)=>s+r.valorTotal,0)))
+  ].join(';');
+  const lines = headerBlock.concat([header.join(';')]).concat(dataLines).concat([totalRow]);
+  const blob = new Blob(['\uFEFF'+lines.join('\n')], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href=url; a.download = `lancamentos_${convenio}_${STATE.competencia.mes}${STATE.competencia.ano}.csv`; a.click();
   URL.revokeObjectURL(url);
@@ -1448,15 +1456,28 @@ function exportCustomReportCSV(){
   const headerBlock = csvHeaderBlock({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt});
   let dataLines;
   if(reportSubTab==='detalhado'){
-    dataLines = [['Competencia','Ano','Convenio','Laboratorio','Paciente','Exame','Qtd','QtdCP','QtdCR','ValorUnit','Valor'].join(';')]
-      .concat(rows.map(r=>[r.competencia,r.ano,convenioLabel(r.convenio),r.laboratorio,r.paciente,r.exameDescricao,r.qtdExibida,r.qtdCP,r.qtdCR,r.valorUnit,r.valorExibido].join(';')));
+    const header = ['Competencia','Ano','Convenio','Laboratorio','Paciente','Exame','Qtd','QtdCP','QtdCR','ValorUnit','ValorTotal'];
+    const rowLines = rows.map(r=>[
+      csvEsc(r.competencia), r.ano, csvEsc(convenioLabel(r.convenio)), csvEsc(r.laboratorio), csvEsc(r.paciente), csvEsc(r.exameDescricao),
+      r.qtdExibida, r.qtdCP, r.qtdCR, csvEsc(fmtMoney(r.valorUnit)), csvEsc(fmtMoney(r.valorExibido))
+    ].join(';'));
+    const totalRow = ['TOTAL','','','','','',
+      rows.reduce((s,r)=>s+r.qtdExibida,0), rows.reduce((s,r)=>s+r.qtdCP,0), rows.reduce((s,r)=>s+r.qtdCR,0),
+      '', csvEsc(fmtMoney(rows.reduce((s,r)=>s+r.valorExibido,0)))
+    ].join(';');
+    dataLines = [header.join(';')].concat(rowLines).concat([totalRow]);
   } else {
     const list = groupRows(rows);
-    dataLines = [[groupColLabel(),'Registros','Qtd','QtdCP','QtdCR','Valor'].join(';')]
-      .concat(list.map(g=>[g.chave,g.registros,g.qtd,g.qtdCP,g.qtdCR,g.valor].join(';')));
+    const header = [groupColLabel(),'Registros','Qtd','QtdCP','QtdCR','ValorTotal'];
+    const rowLines = list.map(g=>[csvEsc(g.chave), g.registros, g.qtd, g.qtdCP, g.qtdCR, csvEsc(fmtMoney(g.valor))].join(';'));
+    const totalRow = ['TOTAL',
+      list.reduce((s,g)=>s+g.registros,0), list.reduce((s,g)=>s+g.qtd,0), list.reduce((s,g)=>s+g.qtdCP,0), list.reduce((s,g)=>s+g.qtdCR,0),
+      csvEsc(fmtMoney(list.reduce((s,g)=>s+g.valor,0)))
+    ].join(';');
+    dataLines = [header.join(';')].concat(rowLines).concat([totalRow]);
   }
   const lines = headerBlock.concat(dataLines);
-  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const blob = new Blob(['\uFEFF'+lines.join('\n')], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=`relatorio_personalizado_${reportSubTab}.csv`; a.click();
   URL.revokeObjectURL(url);
