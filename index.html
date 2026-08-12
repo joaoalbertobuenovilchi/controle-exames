@@ -384,7 +384,7 @@ function vigenciaFor(laboratorio, convenioCadastro){
     .filter(Boolean))];
   return periodos.length ? periodos.join(' / ') : '—';
 }
-/* Monta o bloco de cabeçalho padrão: Prefeitura, Convênio, Laboratório, Vigência e Competência */
+/* Monta o bloco de cabeçalho padrão (HTML): Prefeitura, Convênio, Laboratório, Vigência e Competência */
 function reportHeaderHTML({convenio, laboratorio, vigencia, competenciaText, mes, ano}){
   const compTxt = competenciaText || competenciaLabel(mes, ano);
   return `
@@ -398,6 +398,21 @@ function reportHeaderHTML({convenio, laboratorio, vigencia, competenciaText, mes
       </div>
     </div>
   `;
+}
+/* Mesmo bloco de cabeçalho, em formato de linhas CSV, para exportações abertas no Excel */
+function csvEsc(v){
+  const s = (v===undefined||v===null)?'':String(v);
+  return /[;"\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function csvHeaderBlock({convenio, laboratorio, vigencia, competenciaText}){
+  return [
+    csvEsc(PREFEITURA_NOME),
+    ['Convênio', csvEsc(convenio||'—')].join(';'),
+    ['Laboratório', csvEsc(laboratorio||'—')].join(';'),
+    ['Vigência', csvEsc(vigencia||'—')].join(';'),
+    ['Competência', csvEsc(competenciaText||'—')].join(';'),
+    ''
+  ];
 }
 function showToast(msg){
   const t = document.getElementById('toast');
@@ -982,8 +997,17 @@ function deleteLancamento(id){
 function exportCSV(convenio){
   const rows = STATE.lancamentos.filter(l=>l.convenio===convenio);
   if(rows.length===0){ showToast('Nada para exportar.'); return; }
+  const labsUnicos = [...new Set(rows.map(r=>r.laboratorio))];
+  const labTxt = labsUnicos.length===1 ? labsUnicos[0] : `Todos os laboratórios (${labsUnicos.length})`;
+  const vigenciaTxt = labsUnicos.length===1 ? vigenciaFor(labsUnicos[0], CONV_TO_CADASTRO[convenio]) : '—';
+  const headerBlock = csvHeaderBlock({
+    convenio: convenioLabel(convenio),
+    laboratorio: labTxt,
+    vigencia: vigenciaTxt,
+    competenciaText: competenciaLabel(STATE.competencia.mes, STATE.competencia.ano)
+  });
   const header = ['Paciente','Data','Exame','Laboratorio','Unidade','Resultado','Quantidade','QtdCP','QtdCR','ValorUnit','ValorTotal'];
-  const lines = [header.join(';')].concat(rows.map(r=>[r.paciente,r.data,r.exameDescricao,r.laboratorio,r.unidade,r.resultado,r.quantidade,r.qtdCP,r.qtdCR,r.valorUnit,r.valorTotal].join(';')));
+  const lines = headerBlock.concat([header.join(';')]).concat(rows.map(r=>[r.paciente,r.data,r.exameDescricao,r.laboratorio,r.unidade,r.resultado,r.quantidade,r.qtdCP,r.qtdCR,r.valorUnit,r.valorTotal].join(';')));
   const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href=url; a.download = `lancamentos_${convenio}_${STATE.competencia.mes}${STATE.competencia.ano}.csv`; a.click();
@@ -1312,6 +1336,15 @@ function customReportFiltered(){
   if(f.cota!=='TODOS') rows = rows.filter(r=>r.qtdExibida>0);
   return rows;
 }
+/* Convênio/Laboratório/Vigência/Competência do relatório personalizado, conforme os filtros ativos */
+function customReportHeaderInfo(){
+  const f = customReportState;
+  const convenioTxt = f.convenio==='TODOS' ? 'Todos os convênios' : convenioLabel(f.convenio);
+  const labTxt = f.lab==='TODOS' ? 'Todos os laboratórios' : f.lab;
+  const vigenciaTxt = (f.lab!=='TODOS' && f.convenio!=='TODOS') ? vigenciaFor(f.lab, CONV_TO_CADASTRO[f.convenio]) : '—';
+  const compTxt = (f.mes!=='TODOS' && f.ano!=='TODOS') ? competenciaLabel(f.mes, f.ano) : 'Todos os períodos';
+  return {convenioTxt, labTxt, vigenciaTxt, compTxt};
+}
 function viewRelatorioPersonalizado(){
   const f = customReportState;
   const rows = customReportFiltered();
@@ -1320,10 +1353,7 @@ function viewRelatorioPersonalizado(){
   const labsOpts = availableLabsInData().map(l=>`<option value="${esc(l)}" ${f.lab===l?'selected':''}>${esc(l)}</option>`).join('');
   const anosOpts = availableYearsInData().map(a=>`<option value="${a}" ${String(f.ano)===String(a)?'selected':''}>${a}</option>`).join('');
 
-  const convenioTxt = f.convenio==='TODOS' ? 'Todos os convênios' : convenioLabel(f.convenio);
-  const labTxt = f.lab==='TODOS' ? 'Todos os laboratórios' : f.lab;
-  const vigenciaTxt = (f.lab!=='TODOS' && f.convenio!=='TODOS') ? vigenciaFor(f.lab, CONV_TO_CADASTRO[f.convenio]) : '—';
-  const compTxt = (f.mes!=='TODOS' && f.ano!=='TODOS') ? competenciaLabel(f.mes, f.ano) : 'Todos os períodos';
+  const {convenioTxt, labTxt, vigenciaTxt, compTxt} = customReportHeaderInfo();
 
   return `
   <div class="card">
@@ -1414,15 +1444,18 @@ function renderCustomReportTable(rows){
 function exportCustomReportCSV(){
   const rows = customReportFiltered();
   if(rows.length===0){ showToast('Nada para exportar.'); return; }
-  let lines;
+  const {convenioTxt, labTxt, vigenciaTxt, compTxt} = customReportHeaderInfo();
+  const headerBlock = csvHeaderBlock({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt});
+  let dataLines;
   if(reportSubTab==='detalhado'){
-    lines = [['Competencia','Ano','Convenio','Laboratorio','Paciente','Exame','Qtd','QtdCP','QtdCR','ValorUnit','Valor'].join(';')]
+    dataLines = [['Competencia','Ano','Convenio','Laboratorio','Paciente','Exame','Qtd','QtdCP','QtdCR','ValorUnit','Valor'].join(';')]
       .concat(rows.map(r=>[r.competencia,r.ano,convenioLabel(r.convenio),r.laboratorio,r.paciente,r.exameDescricao,r.qtdExibida,r.qtdCP,r.qtdCR,r.valorUnit,r.valorExibido].join(';')));
   } else {
     const list = groupRows(rows);
-    lines = [[groupColLabel(),'Registros','Qtd','QtdCP','QtdCR','Valor'].join(';')]
+    dataLines = [[groupColLabel(),'Registros','Qtd','QtdCP','QtdCR','Valor'].join(';')]
       .concat(list.map(g=>[g.chave,g.registros,g.qtd,g.qtdCP,g.qtdCR,g.valor].join(';')));
   }
+  const lines = headerBlock.concat(dataLines);
   const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=`relatorio_personalizado_${reportSubTab}.csv`; a.click();
