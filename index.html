@@ -8,6 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
@@ -155,6 +156,29 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 @media(max-width:900px){.report-header .rh-grid{grid-template-columns:repeat(2,1fr);}}
 .report-header .rh-item span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:700;margin-bottom:2px;}
 .report-header .rh-item b{font-size:12.5px;color:var(--ink);}
+
+/* Botão de impressão nos cabeçalhos de relatório */
+.btn.print-btn{display:inline-flex;align-items:center;gap:6px;}
+
+/* Marca de data/hora exibida apenas na impressão */
+.print-timestamp{display:none;}
+
+/* ---------------- Impressão (A4 paisagem) ---------------- */
+@media print{
+  @page{ size: A4 landscape; margin: 12mm; }
+  html, body{ background:#fff !important; }
+  body *{ visibility:hidden; }
+  .print-target, .print-target *{ visibility:visible; }
+  .print-target{ position:absolute; left:0; top:0; width:100%; margin:0; padding:0; border:none; box-shadow:none; background:#fff; }
+  .print-timestamp{ display:block; font-size:10px; color:#666; text-align:right; margin-bottom:8px; }
+  .print-target .table-wrap{ max-height:none !important; overflow:visible !important; border:none !important; }
+  .print-target table{ font-size:11px; width:100%; }
+  .print-target thead th{ position:static !important; background:#E3F2F1 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .print-target tfoot td{ background:#F2F7F7 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .print-target .report-header{ background:#E3F2F1 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; break-inside:avoid; }
+  .print-target table{ break-inside:auto; }
+  .print-target tr{ break-inside:avoid; }
+}
 </style>
 </head>
 <body>
@@ -419,6 +443,24 @@ function showToast(msg){
   t.textContent = msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2600);
 }
+
+/* ---------------- Impressão de relatórios (A4 paisagem) ----------------
+   Imprime apenas o bloco de relatório indicado (cabeçalho + tabela),
+   escondendo o restante da interface. O layout de página (A4 paisagem)
+   é definido via @page no CSS, então não é necessário nenhum plugin. */
+function printReport(targetId){
+  const el = document.getElementById(targetId);
+  if(!el){ showToast('Nada para imprimir.'); return; }
+  document.querySelectorAll('.print-target').forEach(n=>n.classList.remove('print-target'));
+  let ts = el.querySelector('.print-timestamp');
+  if(!ts){ ts = document.createElement('div'); ts.className = 'print-timestamp'; el.insertBefore(ts, el.firstChild); }
+  ts.textContent = 'Emitido em ' + new Date().toLocaleString('pt-BR');
+  el.classList.add('print-target');
+  setTimeout(()=>{ window.print(); }, 60);
+}
+window.addEventListener('afterprint', ()=>{
+  document.querySelectorAll('.print-target').forEach(n=>n.classList.remove('print-target'));
+});
 function esc(s){ return (s===undefined||s===null)?'':String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function escapeRegExp(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
 
@@ -1236,43 +1278,57 @@ function viewRelatorios(){
 
     <div class="section-title">Modelos prontos</div>
     <div class="card">
-      <h2>Relatório 1 — Consolidado por competência</h2>
-      <div class="subtitle">Quantidade e valor por tipo de convênio/processo, por competência já fechada</div>
-      ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:'Todos os laboratórios', vigencia:'—', competenciaText:'Consolidado de todas as competências fechadas'})}
-      <div class="table-wrap"><table>
-        <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th><th class="right">Qtd C.Direta</th><th class="right">Vlr C.Direta</th><th class="right">Qtd Dispensa</th><th class="right">Vlr Dispensa</th><th class="right">Qtd Pregão</th><th class="right">Vlr Pregão</th><th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
-        <tbody>
-          ${rows.length===0 ? `<tr class="empty-row"><td colspan="11">Nenhuma competência fechada ainda.</td></tr>` :
-            rows.map(r=>`<tr>
-              <td><b>${esc(r.nomeBase)}</b></td><td>${r.mes}</td><td>${r.ano}</td>
-              <td class="right">${fmtNum(r.qtdCompraDireta)}</td><td class="right">${fmtMoney(r.valorCompraDireta)}</td>
-              <td class="right">${fmtNum(r.qtdDispensa)}</td><td class="right">${fmtMoney(r.valorDispensa)}</td>
-              <td class="right">${fmtNum(r.qtdPregao)}</td><td class="right">${fmtMoney(r.valorPregao)}</td>
-              <td class="right"><b>${fmtNum(r.qtdTotal)}</b></td><td class="right"><b>${fmtMoney(r.valorTotal)}</b></td>
-            </tr>`).join('')}
-        </tbody>
-        ${rows.length>0?`<tfoot><tr><td colspan="9">TOTAL GERAL (todos os períodos)</td><td class="right">${fmtNum(totQtd)}</td><td class="right">${fmtMoney(totValor)}</td></tr></tfoot>`:''}
-      </table></div>
+      <div class="flexrow">
+        <div>
+          <h2 style="margin:0;">Relatório 1 — Consolidado por competência</h2>
+          <div class="subtitle" style="margin-bottom:0;">Quantidade e valor por tipo de convênio/processo, por competência já fechada</div>
+        </div>
+        <button class="btn secondary small print-btn" onclick="printReport('printRelatorio1')">🖨️ Imprimir</button>
+      </div>
+      <div id="printRelatorio1">
+        ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:'Todos os laboratórios', vigencia:'—', competenciaText:'Consolidado de todas as competências fechadas'})}
+        <div class="table-wrap"><table>
+          <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th><th class="right">Qtd C.Direta</th><th class="right">Vlr C.Direta</th><th class="right">Qtd Dispensa</th><th class="right">Vlr Dispensa</th><th class="right">Qtd Pregão</th><th class="right">Vlr Pregão</th><th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
+          <tbody>
+            ${rows.length===0 ? `<tr class="empty-row"><td colspan="11">Nenhuma competência fechada ainda.</td></tr>` :
+              rows.map(r=>`<tr>
+                <td><b>${esc(r.nomeBase)}</b></td><td>${r.mes}</td><td>${r.ano}</td>
+                <td class="right">${fmtNum(r.qtdCompraDireta)}</td><td class="right">${fmtMoney(r.valorCompraDireta)}</td>
+                <td class="right">${fmtNum(r.qtdDispensa)}</td><td class="right">${fmtMoney(r.valorDispensa)}</td>
+                <td class="right">${fmtNum(r.qtdPregao)}</td><td class="right">${fmtMoney(r.valorPregao)}</td>
+                <td class="right"><b>${fmtNum(r.qtdTotal)}</b></td><td class="right"><b>${fmtMoney(r.valorTotal)}</b></td>
+              </tr>`).join('')}
+          </tbody>
+          ${rows.length>0?`<tfoot><tr><td colspan="9">TOTAL GERAL (todos os períodos)</td><td class="right">${fmtNum(totQtd)}</td><td class="right">${fmtMoney(totValor)}</td></tr></tfoot>`:''}
+        </table></div>
+      </div>
     </div>
 
     <div class="card">
-      <h2>Relatório 2 — Por laboratório e tipo de convênio</h2>
-      <div class="subtitle">Detalha, para cada competência fechada, os 3 laboratórios que compõem o backup</div>
-      ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:'Todos os laboratórios', vigencia:'—', competenciaText:'Consolidado de todas as competências fechadas'})}
-      <div class="table-wrap"><table>
-        <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th><th>Laboratório</th><th class="right">Qtd C.Direta</th><th class="right">Vlr C.Direta</th><th class="right">Qtd Dispensa</th><th class="right">Vlr Dispensa</th><th class="right">Qtd Pregão</th><th class="right">Vlr Pregão</th><th class="right">Cota Princ.</th><th class="right">Cota Reser.</th><th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
-        <tbody>
-          ${rows.length===0 ? `<tr class="empty-row"><td colspan="14">Nenhuma competência fechada ainda.</td></tr>` :
-            rows.flatMap(r=> (r.porLaboratorio||[]).map(pl=>`<tr>
-              <td>${esc(r.nomeBase)}</td><td>${r.mes}</td><td>${r.ano}</td><td><b>${esc(pl.laboratorio)}</b></td>
-              <td class="right">${fmtNum(pl.qtdCompraDireta)}</td><td class="right">${fmtMoney(pl.valorCompraDireta)}</td>
-              <td class="right">${fmtNum(pl.qtdDispensa)}</td><td class="right">${fmtMoney(pl.valorDispensa)}</td>
-              <td class="right">${fmtNum(pl.qtdPregao)}</td><td class="right">${fmtMoney(pl.valorPregao)}</td>
-              <td class="right">${fmtNum(pl.qtdCP)}</td><td class="right">${fmtNum(pl.qtdCR)}</td>
-              <td class="right"><b>${fmtNum(pl.qtdTotal)}</b></td><td class="right"><b>${fmtMoney(pl.valorTotal)}</b></td>
-            </tr>`)).join('')}
-        </tbody>
-      </table></div>
+      <div class="flexrow">
+        <div>
+          <h2 style="margin:0;">Relatório 2 — Por laboratório e tipo de convênio</h2>
+          <div class="subtitle" style="margin-bottom:0;">Detalha, para cada competência fechada, os 3 laboratórios que compõem o backup</div>
+        </div>
+        <button class="btn secondary small print-btn" onclick="printReport('printRelatorio2')">🖨️ Imprimir</button>
+      </div>
+      <div id="printRelatorio2">
+        ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:'Todos os laboratórios', vigencia:'—', competenciaText:'Consolidado de todas as competências fechadas'})}
+        <div class="table-wrap"><table>
+          <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th><th>Laboratório</th><th class="right">Qtd C.Direta</th><th class="right">Vlr C.Direta</th><th class="right">Qtd Dispensa</th><th class="right">Vlr Dispensa</th><th class="right">Qtd Pregão</th><th class="right">Vlr Pregão</th><th class="right">Cota Princ.</th><th class="right">Cota Reser.</th><th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
+          <tbody>
+            ${rows.length===0 ? `<tr class="empty-row"><td colspan="14">Nenhuma competência fechada ainda.</td></tr>` :
+              rows.flatMap(r=> (r.porLaboratorio||[]).map(pl=>`<tr>
+                <td>${esc(r.nomeBase)}</td><td>${r.mes}</td><td>${r.ano}</td><td><b>${esc(pl.laboratorio)}</b></td>
+                <td class="right">${fmtNum(pl.qtdCompraDireta)}</td><td class="right">${fmtMoney(pl.valorCompraDireta)}</td>
+                <td class="right">${fmtNum(pl.qtdDispensa)}</td><td class="right">${fmtMoney(pl.valorDispensa)}</td>
+                <td class="right">${fmtNum(pl.qtdPregao)}</td><td class="right">${fmtMoney(pl.valorPregao)}</td>
+                <td class="right">${fmtNum(pl.qtdCP)}</td><td class="right">${fmtNum(pl.qtdCR)}</td>
+                <td class="right"><b>${fmtNum(pl.qtdTotal)}</b></td><td class="right"><b>${fmtMoney(pl.valorTotal)}</b></td>
+              </tr>`)).join('')}
+          </tbody>
+        </table></div>
+      </div>
     </div>
   `;
 }
@@ -1367,7 +1423,6 @@ function viewRelatorioPersonalizado(){
   <div class="card">
     <h2>🧩 Relatório personalizado</h2>
     <div class="subtitle">Monte o relatório do jeito que você precisar: filtre por laboratório, tipo de convênio, mês, ano, tipo de cota, ou busque por exame/paciente — funciona também sobre as competências já fechadas.</div>
-    ${reportHeaderHTML({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt})}
     <div class="formgrid" style="grid-template-columns:repeat(6,1fr);">
       <div class="field"><label>Laboratório</label><select onchange="crSet('lab',this.value);render();">
         <option value="TODOS" ${f.lab==='TODOS'?'selected':''}>Todos</option>${labsOpts}
@@ -1402,10 +1457,16 @@ function viewRelatorioPersonalizado(){
 
     <div class="flexrow" style="margin:10px 0;">
       <div class="muted" style="font-size:12px;">${fmtNum(rows.length)} registro(s) encontrados · Qtd: <b>${fmtNum(totQtd)}</b> · Valor: <b>${fmtMoney(totValor)}</b></div>
-      <button class="btn secondary small" onclick="exportCustomReportCSV()">⭳ Exportar CSV</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary small print-btn" onclick="printReport('printCustomReport')">🖨️ Imprimir</button>
+        <button class="btn secondary small" onclick="${reportSubTab==='porExame'?'exportPorExameXLSX()':'exportCustomReportCSV()'}">⭳ Exportar ${reportSubTab==='porExame'?'XLSX':'CSV'}</button>
+      </div>
     </div>
 
-    ${renderCustomReportTable(rows)}
+    <div id="printCustomReport">
+      ${reportHeaderHTML({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt})}
+      ${renderCustomReportTable(rows)}
+    </div>
   </div>`;
 }
 function groupKeyFn(){
@@ -1427,6 +1488,7 @@ function calcularDistribuicaoCPCR(qtd){
   const cr = qtd - cp;
   return { cp, cr };
 }
+function round2(v){ return Math.round((v + Number.EPSILON) * 100) / 100; }
 function groupRows(rows){
   const keyFn = groupKeyFn();
   const map = new Map();
@@ -1438,12 +1500,17 @@ function groupRows(rows){
   });
   const list = Array.from(map.entries()).map(([chave,v])=>({chave,...v}));
   // No relatório "Por Exame", a distribuição C.P./C.R. segue a regra fixa 75%/25%
-  // sobre a quantidade total do exame, em vez da soma bruta dos lançamentos individuais.
+  // sobre a quantidade total do exame (em vez da soma bruta dos lançamentos individuais),
+  // e o valor de cada cota é rateado proporcionalmente sobre o valor total do exame —
+  // igual ao modelo de planilha (Qtd C.P./Valor C.P./Qtd C.R./Valor C.R./Valor Total).
   if(reportSubTab==='porExame'){
     list.forEach(g=>{
       const { cp, cr } = calcularDistribuicaoCPCR(g.qtd);
       g.qtdCP = cp;
       g.qtdCR = cr;
+      const avgUnit = g.qtd>0 ? (g.valor/g.qtd) : 0;
+      g.valorCP = round2(cp*avgUnit);
+      g.valorCR = round2(g.valor - g.valorCP); // resto, garante soma exata com o total
     });
   }
   return list.sort((a,b)=>b.valor-a.valor);
@@ -1462,6 +1529,31 @@ function renderCustomReportTable(rows){
     </table></div>`;
   }
   const list = groupRows(rows);
+  if(reportSubTab==='porExame'){
+    // Layout igual ao modelo de planilha: Exame | Registros | Qtd | Qtd C.P. | Valor C.P. | Qtd C.R. | Valor C.R. | Valor Total
+    const totRegistros = list.reduce((s,g)=>s+g.registros,0);
+    const totQtd = list.reduce((s,g)=>s+g.qtd,0);
+    const totQtdCP = list.reduce((s,g)=>s+g.qtdCP,0);
+    const totValorCP = list.reduce((s,g)=>s+g.valorCP,0);
+    const totQtdCR = list.reduce((s,g)=>s+g.qtdCR,0);
+    const totValorCR = list.reduce((s,g)=>s+g.valorCR,0);
+    const totValor = list.reduce((s,g)=>s+g.valor,0);
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Exame</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Valor C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor C.R.</th><th class="right">Valor Total</th></tr></thead>
+      <tbody>${list.map(g=>`<tr>
+        <td><b>${esc(g.chave)}</b></td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td>
+        <td class="right">${fmtNum(g.qtdCP)}</td><td class="right">${fmtMoney(g.valorCP)}</td>
+        <td class="right">${fmtNum(g.qtdCR)}</td><td class="right">${fmtMoney(g.valorCR)}</td>
+        <td class="right"><b>${fmtMoney(g.valor)}</b></td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr>
+        <td>TOTAL</td><td class="right">${fmtNum(totRegistros)}</td><td class="right">${fmtNum(totQtd)}</td>
+        <td class="right">${fmtNum(totQtdCP)}</td><td class="right">${fmtMoney(totValorCP)}</td>
+        <td class="right">${fmtNum(totQtdCR)}</td><td class="right">${fmtMoney(totValorCR)}</td>
+        <td class="right">${fmtMoney(totValor)}</td>
+      </tr></tfoot>
+    </table></div>`;
+  }
   return `<div class="table-wrap"><table>
     <thead><tr><th>${groupColLabel()}</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
     <tbody>${list.map(g=>`<tr><td><b>${esc(g.chave)}</b></td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td><td class="right">${fmtNum(g.qtdCP)}</td><td class="right">${fmtNum(g.qtdCR)}</td><td class="right"><b>${fmtMoney(g.valor)}</b></td></tr>`).join('')}</tbody>
@@ -1499,6 +1591,100 @@ function exportCustomReportCSV(){
   const url = URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=`relatorio_personalizado_${reportSubTab}.csv`; a.click();
   URL.revokeObjectURL(url);
+}
+
+/* Remove acentos e espaços para compor nomes de arquivo, ex.: "Compra Direta" -> "COMPRA_DIRETA" */
+function slugPart(s){
+  return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,'_');
+}
+function buildPorExameFilename(){
+  const f = customReportState;
+  const convPart = f.convenio==='TODOS' ? 'TODOS_OS_CONVENIOS' : slugPart(convenioLabel(f.convenio));
+  const labPart = f.lab==='TODOS' ? 'TODOS_OS_LABORATORIOS' : slugPart(f.lab);
+  const compPart = (f.mes!=='TODOS' && f.ano!=='TODOS') ? `${slugPart(f.mes)}_${f.ano}` : 'TODOS_OS_PERIODOS';
+  return `${convPart}_-_${labPart}_-_${compPart}_-_POR_EXAME.xlsx`;
+}
+
+/* Exporta o relatório "Por Exame" em .xlsx formatado, seguindo o modelo de planilha padrão:
+   cabeçalho com Prefeitura/Convênio/Laboratório/Vigência/Competência, tabela com Exame,
+   Registros, Qtd, Qtd C.P., Valor C.P., Qtd C.R., Valor C.R. e Valor Total, e linha de TOTAL. */
+async function exportPorExameXLSX(){
+  const rows = customReportFiltered();
+  if(rows.length===0){ showToast('Nada para exportar.'); return; }
+  if(typeof ExcelJS==='undefined'){ showToast('Biblioteca de exportação XLSX não carregou. Verifique sua conexão e tente novamente.'); return; }
+
+  // Garante que os grupos tragam valorCP/valorCR calculados (regra 75%/25%), independente
+  // de qual aba esteja ativa no momento do clique.
+  const savedTab = reportSubTab;
+  reportSubTab = 'porExame';
+  const list = groupRows(rows);
+  reportSubTab = savedTab;
+
+  const {convenioTxt, labTxt, vigenciaTxt, compTxt} = customReportHeaderInfo();
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Por Exame');
+  ws.columns = [{width:40},{width:12},{width:10},{width:10},{width:12},{width:10},{width:12},{width:14}];
+
+  const grayFill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFD9D9D9'} };
+  const boldFont = { name:'Arial', size:11, bold:true };
+  const normalFont = { name:'Arial', size:10 };
+  const thin = { style:'thin', color:{argb:'FFBFBFBF'} };
+  const allBorders = { top:thin, bottom:thin, left:thin, right:thin };
+  const moneyFmt = '"R$"\\ #,##0.00';
+
+  ws.mergeCells('A1:D1');
+  ws.getCell('A1').value = PREFEITURA_NOME;
+  ws.getCell('A1').font = boldFont;
+
+  [['Convênio',convenioTxt],['Laboratório',labTxt],['Vigência',vigenciaTxt],['Competência',compTxt]].forEach((pair,i)=>{
+    const r = i+2;
+    ws.getCell(`A${r}`).value = pair[0]; ws.getCell(`A${r}`).font = boldFont;
+    ws.getCell(`B${r}`).value = pair[1]; ws.getCell(`B${r}`).font = boldFont;
+  });
+
+  const headerRowIdx = 7;
+  ['Exame','Registros','Qtd','QtdCP','Valor','QtdCR','Valor','ValorTotal'].forEach((h,i)=>{
+    const cell = ws.getCell(headerRowIdx, i+1);
+    cell.value = h; cell.font = boldFont; cell.fill = grayFill;
+    cell.alignment = { horizontal:'center' }; cell.border = allBorders;
+  });
+
+  let r = headerRowIdx+1;
+  list.forEach(g=>{
+    const vals = [g.chave, g.registros, g.qtd, g.qtdCP, g.valorCP, g.qtdCR, g.valorCR, g.valor];
+    vals.forEach((v,i)=>{
+      const cell = ws.getCell(r, i+1);
+      cell.value = v; cell.font = normalFont; cell.border = allBorders;
+      cell.alignment = { horizontal: i===0 ? 'left' : ([4,6,7].includes(i) ? 'right' : 'center') };
+      if(i===4||i===6||i===7) cell.numFmt = moneyFmt;
+    });
+    r++;
+  });
+
+  const totalVals = ['TOTAL',
+    list.reduce((s,g)=>s+g.registros,0), list.reduce((s,g)=>s+g.qtd,0),
+    list.reduce((s,g)=>s+g.qtdCP,0), list.reduce((s,g)=>s+g.valorCP,0),
+    list.reduce((s,g)=>s+g.qtdCR,0), list.reduce((s,g)=>s+g.valorCR,0),
+    list.reduce((s,g)=>s+g.valor,0)
+  ];
+  totalVals.forEach((v,i)=>{
+    const cell = ws.getCell(r, i+1);
+    cell.value = v; cell.font = boldFont; cell.fill = grayFill; cell.border = allBorders;
+    cell.alignment = { horizontal: i===0 ? 'left' : ([4,6,7].includes(i) ? 'right' : 'center') };
+    if(i===4||i===6||i===7) cell.numFmt = moneyFmt;
+  });
+
+  try{
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download = buildPorExameFilename(); a.click();
+    URL.revokeObjectURL(url);
+  }catch(err){
+    console.error(err);
+    showToast('Erro ao gerar o arquivo XLSX.');
+  }
 }
 
 /* ---------------- Competência editor ---------------- */
