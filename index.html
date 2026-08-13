@@ -1419,6 +1419,14 @@ function groupKeyFn(){
 function groupColLabel(){
   return {porExame:'Exame', porPaciente:'Paciente', porLab:'Laboratório', porMes:'Competência', porConvenio:'Convênio'}[reportSubTab] || '';
 }
+/* Distribui uma quantidade em 75% Cota Principal / 25% Cota Reserva, com arredondamento
+   padrão (0,4 arredonda para baixo, 0,5 arredonda para cima). O C.R. é sempre calculado
+   como o resto (qtd - cp), garantindo que a soma das duas partes bata exatamente com o total. */
+function calcularDistribuicaoCPCR(qtd){
+  const cp = Math.round(qtd * 0.75);
+  const cr = qtd - cp;
+  return { cp, cr };
+}
 function groupRows(rows){
   const keyFn = groupKeyFn();
   const map = new Map();
@@ -1428,7 +1436,17 @@ function groupRows(rows){
     const g = map.get(k);
     g.qtd+=r.qtdExibida; g.qtdCP+=r.qtdCP; g.qtdCR+=r.qtdCR; g.valor+=r.valorExibido; g.registros++;
   });
-  return Array.from(map.entries()).map(([chave,v])=>({chave,...v})).sort((a,b)=>b.valor-a.valor);
+  const list = Array.from(map.entries()).map(([chave,v])=>({chave,...v}));
+  // No relatório "Por Exame", a distribuição C.P./C.R. segue a regra fixa 75%/25%
+  // sobre a quantidade total do exame, em vez da soma bruta dos lançamentos individuais.
+  if(reportSubTab==='porExame'){
+    list.forEach(g=>{
+      const { cp, cr } = calcularDistribuicaoCPCR(g.qtd);
+      g.qtdCP = cp;
+      g.qtdCR = cr;
+    });
+  }
+  return list.sort((a,b)=>b.valor-a.valor);
 }
 function renderCustomReportTable(rows){
   if(rows.length===0) return `<div class="helpbox">Nenhum registro encontrado para os filtros selecionados.</div>`;
