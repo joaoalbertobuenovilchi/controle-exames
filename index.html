@@ -1470,6 +1470,33 @@ function setNfTab(t){ nfTab=t; render(); }
 function setNfComp(v){ nfComp=v; nfLabFilter='TODOS'; render(); }
 function setNfLabFilter(v){ nfLabFilter=v; render(); }
 
+/* Agrupa os lançamentos por exame e aplica a mesma regra de distribuição
+   75% Cota Principal / 25% Cota Reserva usada no relatório "Por Exame" do
+   módulo Relatórios (calcularDistribuicaoCPCR), somando os totais por cota.
+   Isso garante que a Emissão de N.F. mostre os MESMOS totais de quantidade e
+   valor de Cota Principal e Cota Reserva que já aparecem em Relatórios, para
+   qualquer tipo de convênio/processo. É apenas um cálculo de exibição — não
+   altera nenhum lançamento nem dado já cadastrado no sistema. */
+function computeCotaTotais(lancs){
+  const porExame = new Map();
+  lancs.forEach(l=>{
+    const k = l.exameDescricao;
+    if(!porExame.has(k)) porExame.set(k, {qtd:0, valor:0});
+    const g = porExame.get(k);
+    g.qtd += l.quantidade;
+    g.valor += l.valorTotal;
+  });
+  let qtdCP=0, valCP=0, qtdCR=0, valCR=0;
+  porExame.forEach(g=>{
+    const { cp, cr } = calcularDistribuicaoCPCR(g.qtd);
+    const avgUnit = g.qtd>0 ? (g.valor/g.qtd) : 0;
+    const vcp = round2(cp*avgUnit);
+    const vcr = round2(g.valor - vcp);
+    qtdCP += cp; valCP += vcp; qtdCR += cr; valCR += vcr;
+  });
+  return { qtdCP, valCP: round2(valCP), qtdCR, valCR: round2(valCR) };
+}
+
 function viewNF(){
   if(!STATE.tiposConvenio.find(t=>t.key===nfTab)) nfTab = STATE.tiposConvenio[0]?.key;
   const cadConv = cadastroValueFor(nfTab);
@@ -1511,10 +1538,7 @@ function viewNF(){
 function nfCard(labName, convKey, cadConv, source){
   const lab = STATE.labs.find(l=>l.nome===labName) || {};
   const lancs = source.filter(l=>l.convenio===convKey && l.laboratorio===labName);
-  const qtdCP = lancs.reduce((s,l)=>s+l.qtdCP,0);
-  const valCP = lancs.reduce((s,l)=>s+l.qtdCP*l.valorUnit,0);
-  const qtdCR = lancs.reduce((s,l)=>s+l.qtdCR,0);
-  const valCR = lancs.reduce((s,l)=>s+l.qtdCR*l.valorUnit,0);
+  const { qtdCP, valCP, qtdCR, valCR } = computeCotaTotais(lancs);
   const cardId = 'nfcard_'+slugId(labName)+'_'+convKey;
   const temEmail = !!(lab.email && lab.email.trim());
   return `
@@ -1558,10 +1582,7 @@ function emailReportLab(labName, convKey){
   const cadConv = cadastroValueFor(convKey);
   const source = nfLancamentosSource();
   const lancs = source.filter(l=>l.convenio===convKey && l.laboratorio===labName);
-  const qtdCP = lancs.reduce((s,l)=>s+l.qtdCP,0);
-  const valCP = lancs.reduce((s,l)=>s+l.qtdCP*l.valorUnit,0);
-  const qtdCR = lancs.reduce((s,l)=>s+l.qtdCR,0);
-  const valCR = lancs.reduce((s,l)=>s+l.qtdCR*l.valorUnit,0);
+  const { qtdCP, valCP, qtdCR, valCR } = computeCotaTotais(lancs);
   const compTxt = nfCompetenciaLabelText();
   const subject = `Resumo para emissão de N.F. - ${labName} - ${convenioLabel(convKey)} - ${compTxt}`;
   const body =
