@@ -115,6 +115,9 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 .badge.tipo-6{background:#E1EEFB;color:#28588F;}
 .badge.tipo-7{background:#F7E6F4;color:#8A3B7C;}
 .badge.tipo-8{background:#FFF3D6;color:#8A6A16;}
+.chip{display:inline-flex;align-items:center;gap:5px;background:#EEF5F5;color:var(--teal-dark);border:1px solid #CFE7E5;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;margin:2px 4px 2px 0;}
+.chip a{color:var(--red);text-decoration:none;font-weight:800;line-height:1;}
+.chip a:hover{opacity:.7;}
 
 .btn{
   border:none;cursor:pointer;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:8px;
@@ -362,6 +365,8 @@ let lancTab = "COMPRADIRETA";
 let nfTab = "COMPRADIRETA";
 let nfComp = "ATUAL";        // 'ATUAL' ou o id de uma competência já fechada (STATE.historico)
 let nfLabFilter = "TODOS";   // 'TODOS' ou o nome de um laboratório específico
+let exApelidoAberto = null;  // id do exame com o campo de "novo apelido" aberto no Cadastro de Exames
+let ultimoLoteImportado = {}; // { [convenioKey]: {loteId, arquivo, quantidade, dataHora} } — última importação de arquivo em Lançar Exames, por aba
 
 /* ---------------- Storage (Firebase Firestore) ---------------- */
 async function loadState(){
@@ -392,6 +397,14 @@ function garantirTiposConvenio(){
   }
   if(!STATE.tiposConvenio.find(t=>t.key===lancTab)) lancTab = STATE.tiposConvenio[0].key;
   if(!STATE.tiposConvenio.find(t=>t.key===nfTab)) nfTab = STATE.tiposConvenio[0].key;
+  garantirApelidosExames();
+}
+/* Garante que todo exame cadastrado (inclusive os já existentes, criados antes deste
+   recurso existir) tenha a lista "apelidos" (nomes alternativos/sinônimos usados por
+   laboratórios). NUNCA remove ou altera a descrição original nem qualquer outro dado —
+   apenas cria a lista vazia quando ainda não existe. */
+function garantirApelidosExames(){
+  (STATE.exames||[]).forEach(e=>{ if(!Array.isArray(e.apelidos)) e.apelidos = []; });
 }
 let saveTimer = null;
 let saving = false;
@@ -975,9 +988,16 @@ function viewExames(){
       {key:'descricao',label:'Descrição'},{key:'laboratorio',label:'Laboratório'},{key:'convenio',label:'Convênio'},{key:'periodo',label:'Período'}
     ], frMatchExames, 'frDeleteExames', 'frReplaceExames')}
     <div class="card">
-      <div class="flexrow"><h2 class="sortable-title" style="margin:0;" onclick="sortExames()" title="Clique para colocar em ordem alfabética">Exames cadastrados <span class="sort-ic">⇅ A-Z</span></h2><input id="exFiltro" placeholder="Filtrar por descrição ou laboratório…" style="max-width:260px;padding:7px 10px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;" oninput="debouncedRender()"></div>
+      <div class="flexrow"><h2 class="sortable-title" style="margin:0;" onclick="sortExames()" title="Clique para colocar em ordem alfabética">Exames cadastrados <span class="sort-ic">⇅ A-Z</span></h2><input id="exFiltro" placeholder="Filtrar por descrição, apelido ou laboratório…" style="max-width:280px;padding:7px 10px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;" oninput="debouncedRender()"></div>
+      <div class="helpbox">
+        🏷️ <b>Nomes alternativos (apelidos):</b> cadastre aqui os outros nomes que os laboratórios usam
+        para o mesmo exame (ex.: exame de fezes cadastrado como "Parasitológico de Fezes" pode ter os
+        apelidos "PPF", "Protoparasitológico", "Pesquisa de Ovos e Larvas nas Fezes"). Ao importar arquivos
+        ou usar o Comparativo entre Laboratórios, o sistema passa a reconhecer o exame por qualquer um
+        desses nomes. Adicionar ou remover apelidos não altera nem apaga nenhum dado já lançado.
+      </div>
       <div class="table-wrap" style="margin-top:10px;"><table>
-        <thead><tr><th>Status</th><th>Exame</th><th>Laboratório</th><th>Convênio</th><th>Período</th><th class="right">Cota Princ.</th><th class="right">Usada</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th><th></th></tr></thead>
+        <thead><tr><th>Status</th><th>Exame</th><th>Nomes alternativos</th><th>Laboratório</th><th>Convênio</th><th>Período</th><th class="right">Cota Princ.</th><th class="right">Usada</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th><th></th></tr></thead>
         <tbody>${renderExamesRows()}</tbody>
       </table></div>
     </div>
@@ -986,13 +1006,14 @@ function viewExames(){
 function renderExamesRows(){
   const filtro = (document.getElementById('exFiltro')?.value||'').toLowerCase();
   let list = STATE.exames;
-  if(filtro) list = list.filter(e=> e.descricao.toLowerCase().includes(filtro) || e.laboratorio.toLowerCase().includes(filtro));
-  if(list.length===0) return `<tr class="empty-row"><td colspan="10">Nenhum exame encontrado.</td></tr>`;
+  if(filtro) list = list.filter(e=> e.descricao.toLowerCase().includes(filtro) || e.laboratorio.toLowerCase().includes(filtro) || (e.apelidos||[]).some(a=>a.toLowerCase().includes(filtro)));
+  if(list.length===0) return `<tr class="empty-row"><td colspan="11">Nenhum exame encontrado.</td></tr>`;
   return list.map(e=>{
     const usada = usoCotaPrincipal(e.id);
     return `<tr>
       <td><span class="badge ${e.tipo==='ATIVO'?'ativo':'inativo'}">${e.tipo}</span></td>
       <td><b>${esc(e.descricao)}</b></td>
+      <td style="white-space:normal;min-width:200px;">${renderApelidosCell(e)}</td>
       <td>${esc(e.laboratorio)}</td>
       <td>${esc(e.convenio)}</td>
       <td>${esc(e.periodo)||'—'}</td>
@@ -1004,6 +1025,41 @@ function renderExamesRows(){
     </tr>`;
   }).join('');
 }
+/* ---------------- Apelidos (nomes alternativos) de um exame cadastrado ---------------- */
+function renderApelidosCell(e){
+  const apelidos = e.apelidos || [];
+  const chips = apelidos.map((a,idx)=>`<span class="chip">${esc(a)}<a href="#" onclick="removeApelido('${e.id}',${idx});return false;" title="Remover apelido">×</a></span>`).join('');
+  const aberto = exApelidoAberto===e.id;
+  return `<div class="apelidos-cell">
+    <div>${chips || '<span class="muted" style="font-size:11.5px;">Nenhum ainda</span>'}</div>
+    ${aberto ? `
+      <div style="display:flex;gap:4px;margin-top:6px;">
+        <input id="apelidoInput_${e.id}" placeholder="Ex: PPF" style="flex:1;padding:5px 8px;font-size:12px;border:1px solid var(--line);border-radius:6px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addApelido('${e.id}');}">
+        <button class="btn small" onclick="addApelido('${e.id}')">Add</button>
+        <button class="btn ghost small" onclick="exApelidoAberto=null;render();">✕</button>
+      </div>` : `<button class="btn ghost small" style="margin-top:4px;padding:2px 6px;" onclick="exApelidoAberto='${e.id}';render();setTimeout(()=>document.getElementById('apelidoInput_${e.id}')?.focus(),0);">+ apelido</button>`}
+  </div>`;
+}
+function addApelido(id){
+  const input = document.getElementById('apelidoInput_'+id);
+  if(!input) return;
+  const val = input.value.trim();
+  if(!val) return;
+  const ex = STATE.exames.find(e=>e.id===id);
+  if(!ex) return;
+  if(!Array.isArray(ex.apelidos)) ex.apelidos = [];
+  const jaExiste = normTxt(ex.descricao)===normTxt(val) || ex.apelidos.some(a=>normTxt(a)===normTxt(val));
+  if(jaExiste){ showToast('Esse nome já está cadastrado para este exame.'); input.value=''; return; }
+  ex.apelidos.push(val);
+  saveState(); render();
+  setTimeout(()=>document.getElementById('apelidoInput_'+id)?.focus(),0);
+}
+function removeApelido(id, idx){
+  const ex = STATE.exames.find(e=>e.id===id);
+  if(!ex || !Array.isArray(ex.apelidos)) return;
+  ex.apelidos.splice(idx,1);
+  saveState(); render();
+}
 function addExame(){
   const descricao = document.getElementById('exDescricao').value.trim();
   const laboratorio = document.getElementById('exLab').value;
@@ -1013,6 +1069,7 @@ function addExame(){
     id: uid(),
     tipo: document.getElementById('exTipo').value,
     descricao,
+    apelidos: [],
     laboratorio,
     convenio: document.getElementById('exConvenio').value,
     periodo: document.getElementById('exPeriodo').value.trim(),
@@ -1181,8 +1238,9 @@ function viewLancamento(){
         </div>
       </div>
       <div class="helpbox" style="margin-top:12px;">
-        O arquivo deve ter colunas como <b>Paciente, Data, Exame, Laboratório, Unidade, Resultado, Quantidade</b> (os nomes podem variar um pouco). Cada exame informado precisa já existir no <b>Cadastro de Exames</b> com o mesmo nome, laboratório e convênio desta aba (${convenioLabel(lancTab)}) — do contrário a linha será ignorada e listada no aviso ao final da importação.
+        O arquivo deve ter colunas como <b>Paciente, Data, Exame, Laboratório, Unidade, Resultado, Quantidade</b> (os nomes podem variar um pouco). Cada exame informado precisa já existir no <b>Cadastro de Exames</b> com o mesmo nome (ou apelido cadastrado), laboratório e convênio desta aba (${convenioLabel(lancTab)}) — do contrário a linha será ignorada e listada no aviso ao final da importação.
       </div>
+      ${ultimoLoteVisivelHtml()}
     </div>
 
     ${findReplacePanel('lanc', [
@@ -1191,7 +1249,10 @@ function viewLancamento(){
 
     <div class="card">
       <div class="flexrow"><h2 style="margin:0;">Lançamentos — ${convenioLabel(lancTab)}</h2>
-        <button class="btn secondary small" onclick="exportCSV('${lancTab}')">⭳ Exportar CSV</button>
+        <div>
+          <button class="btn ghost small" onclick="limparImportadosDaAba()" title="Exclui de uma só vez todos os lançamentos desta aba que vieram de importação de arquivo (lançamentos digitados manualmente não são afetados)">🗑 Excluir importados desta aba</button>
+          <button class="btn secondary small" onclick="exportCSV('${lancTab}')">⭳ Exportar CSV</button>
+        </div>
       </div>
       <div class="table-wrap" style="margin-top:10px;"><table>
         <thead><tr><th>Paciente</th><th>Data</th><th>Exame</th><th>Laboratório</th><th>Unidade</th><th>Resultado</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Vlr. Unit.</th><th class="right">Vlr. Total</th><th></th></tr></thead>
@@ -1226,6 +1287,43 @@ function usoCotaReserva(exameId){
   return STATE.lancamentos.filter(l=>l.exameId===exameId).reduce((s,l)=>s+l.qtdCR,0);
 }
 function setLancTab(t){ lancTab=t; render(); }
+/* ---------------- Exclusão em lote de lançamentos importados (Lançar Exames) ----------------
+   Resolve o problema de duplicidade quando o arquivo de origem precisa ser corrigido e
+   reimportado: em vez de apagar linha por linha, o usuário pode desfazer a última
+   importação (pelo lote) ou excluir de uma vez todos os lançamentos importados da aba
+   atual. Em nenhum dos dois casos os lançamentos digitados manualmente são afetados. */
+function ultimoLoteVisivelHtml(){
+  const info = ultimoLoteImportado[lancTab];
+  if(!info) return '';
+  const qtdAtual = STATE.lancamentos.filter(l=>l.loteImportacaoId===info.loteId).length;
+  if(qtdAtual===0){ return ''; }
+  return `
+    <div class="helpbox" style="margin-top:10px;background:#FFF3D6;border-color:#F0DCA0;color:#6B5410;">
+      📥 Última importação nesta aba: <b>${esc(info.arquivo)}</b> — ${fmtNum(qtdAtual)} lançamento(s) em ${esc(info.dataHora)}.
+      Precisou corrigir o arquivo de origem? &nbsp;
+      <button class="btn ghost small" style="background:#fff;" onclick="desfazerUltimaImportacao()">↩ Desfazer esta importação (excluir os ${fmtNum(qtdAtual)})</button>
+    </div>`;
+}
+function desfazerUltimaImportacao(){
+  const info = ultimoLoteImportado[lancTab];
+  if(!info) return;
+  const alvo = STATE.lancamentos.filter(l=>l.loteImportacaoId===info.loteId);
+  if(alvo.length===0){ ultimoLoteImportado[lancTab]=null; render(); return; }
+  if(!confirm(`Excluir os ${alvo.length} lançamento(s) da última importação ("${info.arquivo}")? Esta ação não pode ser desfeita.`)) return;
+  STATE.lancamentos = STATE.lancamentos.filter(l=>l.loteImportacaoId!==info.loteId);
+  ultimoLoteImportado[lancTab] = null;
+  saveState(); render();
+  showToast('Última importação desfeita com sucesso.');
+}
+function limparImportadosDaAba(){
+  const alvo = STATE.lancamentos.filter(l=>l.convenio===lancTab && l.importado);
+  if(alvo.length===0){ showToast('Não há lançamentos importados nesta aba (competência atual).'); return; }
+  if(!confirm(`Excluir TODOS os ${alvo.length} lançamento(s) importado(s) de arquivo na aba ${convenioLabel(lancTab)} (competência atual)? Lançamentos digitados manualmente NÃO serão afetados. Esta ação não pode ser desfeita.`)) return;
+  STATE.lancamentos = STATE.lancamentos.filter(l=>!(l.convenio===lancTab && l.importado));
+  ultimoLoteImportado[lancTab] = null;
+  saveState(); render();
+  showToast('Lançamentos importados desta aba foram excluídos.');
+}
 function addLancamento(){
   const paciente = document.getElementById('lcPaciente').value.trim();
   const laboratorio = document.getElementById('lcLab').value;
@@ -1296,6 +1394,40 @@ function exportCSV(convenio){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href=url; a.download = `lancamentos_${convenio}_${STATE.competencia.mes}${STATE.competencia.ano}.csv`; a.click();
   URL.revokeObjectURL(url);
+}
+
+/* ---------------- Reconhecimento de exames por nome (descrição cadastrada + apelidos) ----------------
+   Cada exame cadastrado pode ter uma lista de "apelidos" (outros nomes usados pelos laboratórios
+   para o mesmo exame, ex.: "PPF", "Parasitológico de Fezes", "Pesquisa de Ovos e Larvas nas Fezes").
+   Estas funções são usadas tanto na Importação de Lançamentos quanto no Comparativo entre
+   Laboratórios, para que o exame seja reconhecido independentemente do nome usado no arquivo. */
+function exameNomesPossiveis(exame){
+  return [exame.descricao, ...((exame.apelidos)||[])];
+}
+function exameCasaComTexto(exame, texto){
+  const nt = normTxt(texto);
+  if(!nt) return false;
+  return exameNomesPossiveis(exame).some(n=>{
+    const nn = normTxt(n);
+    return !!nn && (nn===nt || nn.includes(nt) || nt.includes(nn));
+  });
+}
+/* Dado um nome de exame vindo de um arquivo importado, tenta reconhecê-lo entre os exames
+   cadastrados (por descrição exata ou por qualquer apelido cadastrado) e devolve a descrição
+   OFICIAL/cadastrada correspondente — usado para "normalizar" nomes diferentes de um mesmo
+   exame antes de comparar dois arquivos entre si (Comparativo entre Laboratórios). Se nenhum
+   exame cadastrado corresponder, devolve o próprio nome original, sem alterá-lo. */
+function canonicalizeExameNome(nome){
+  const nt = normTxt(nome);
+  if(!nt) return nome;
+  let ex = STATE.exames.find(e => exameNomesPossiveis(e).some(n=>normTxt(n)===nt));
+  if(!ex){
+    ex = STATE.exames.find(e => exameNomesPossiveis(e).some(n=>{
+      const nn = normTxt(n);
+      return !!nn && (nt.includes(nn) || nn.includes(nt));
+    }));
+  }
+  return ex ? ex.descricao : nome;
 }
 
 /* ---------------- Importação de arquivos (xlsx / csv / docx / txt) ---------------- */
@@ -1379,16 +1511,17 @@ async function handleImportFile(e){
     else if(ext==='docx') rows = await parseDOCXFile(file);
     else if(ext==='txt') rows = await parseTXTFile(file);
     else { showToast('Formato não suportado. Use .xlsx, .csv, .docx ou .txt.'); return; }
-    importLancamentosFromRows(rows);
+    importLancamentosFromRows(rows, file.name);
   }catch(err){
     console.error(err);
     showToast('Erro ao ler o arquivo: '+err.message);
   }
   e.target.value = '';
 }
-function importLancamentosFromRows(rows){
+function importLancamentosFromRows(rows, nomeArquivo){
   if(!rows || rows.length===0){ showToast('Nenhuma linha reconhecida no arquivo.'); return; }
   const cadConv = cadastroValueFor(lancTab);
+  const loteId = uid(); // identifica este lote de importação, para permitir excluir/desfazer de uma vez só
   let importados = 0;
   const ignorados = [];
   rows.forEach(r=>{
@@ -1402,12 +1535,16 @@ function importLancamentosFromRows(rows){
 
     if(!exameVal){ ignorados.push('(linha sem nome de exame)'); return; }
 
+    // 1ª tentativa: nome exatamente igual à descrição cadastrada OU a algum apelido/nome
+    // alternativo cadastrado para o exame (ex.: "PPF" cadastrado como apelido de
+    // "Parasitológico de Fezes"), respeitando laboratório (quando informado no arquivo).
     let exame = STATE.exames.find(e => e.tipo==='ATIVO' && e.convenio===cadConv &&
-      e.descricao.toLowerCase().trim()===exameVal.toLowerCase().trim() &&
+      exameNomesPossiveis(e).some(n => normTxt(n)===normTxt(exameVal)) &&
       (!labVal || e.laboratorio.toLowerCase()===labVal.toLowerCase()));
+    // 2ª tentativa: correspondência parcial (um contém o outro), também considerando apelidos.
     if(!exame){
       exame = STATE.exames.find(e => e.tipo==='ATIVO' && e.convenio===cadConv &&
-        e.descricao.toLowerCase().includes(exameVal.toLowerCase()));
+        exameCasaComTexto(e, exameVal));
     }
     if(!exame){ ignorados.push(exameVal); return; }
 
@@ -1426,6 +1563,7 @@ function importLancamentosFromRows(rows){
       valorUnit: exame.valorUnit, valorTotal: qtdVal*exame.valorUnit,
       competencia: STATE.competencia.mes, ano: STATE.competencia.ano,
       importado: true,
+      loteImportacaoId: loteId, loteImportacaoArquivo: nomeArquivo || '',
     });
     importados++;
   });
@@ -1434,9 +1572,15 @@ function importLancamentosFromRows(rows){
   let msg = `Importação concluída: ${importados} lançamento(s) importado(s).`;
   if(ignorados.length>0) msg += ` ${ignorados.length} linha(s) ignorada(s).`;
   showToast(msg);
+  if(importados>0){
+    ultimoLoteImportado[lancTab] = {
+      loteId, arquivo: nomeArquivo || '(arquivo importado)',
+      quantidade: importados, dataHora: new Date().toLocaleString('pt-BR'),
+    };
+  }
   if(ignorados.length>0){
     const uniq = [...new Set(ignorados)].slice(0,15);
-    alert('Algumas linhas não foram importadas porque o exame não foi encontrado no Cadastro de Exames (confira nome, laboratório e convênio):\n\n- '+uniq.join('\n- ')+(ignorados.length>15?'\n... e outras.':''));
+    alert('Algumas linhas não foram importadas porque o exame não foi encontrado no Cadastro de Exames (confira nome, apelido cadastrado, laboratório e convênio):\n\n- '+uniq.join('\n- ')+(ignorados.length>15?'\n... e outras.':''));
   }
 }
 
@@ -1749,8 +1893,11 @@ function normTxt(s){
    o mesmo motor de leitura de colunas (extractField) usado no Lançamento de Exames. */
 function extractComparativoRows(rows){
   return rows.map(r=>({
+    // O nome do exame é "canonicalizado" para a descrição oficial cadastrada (via apelidos),
+    // assim os dois arquivos comparados usam o mesmo nome de referência mesmo que os
+    // laboratórios chamem o exame de formas diferentes.
     paciente: String(extractField(r,['paciente','nome']) ?? '').trim(),
-    exame: String(extractField(r,['exame','descricao']) ?? '').trim(),
+    exame: canonicalizeExameNome(String(extractField(r,['exame','descricao']) ?? '').trim()),
     quantidade: Number(extractField(r,['quant','qtd'])) || 1,
   })).filter(r=>r.paciente || r.exame);
 }
@@ -1787,6 +1934,18 @@ function resetComparativoLado(lado){
   if(lado==='principal'){ data.principalLab=''; data.principalArquivo=''; data.principalRows=null; }
   else { data.tercLab=''; data.tercArquivo=''; data.tercRows=null; }
   render();
+}
+/* Excluir/limpar de uma vez os dois arquivos importados (Principal e Terceirizado) da aba
+   de convênio/processo atual do Comparativo. Esses dados nunca são gravados em Lançamentos
+   nem em nenhum outro cadastro — por isso limpar aqui não afeta dado algum já registrado
+   no sistema, apenas esvazia a conferência em andamento para permitir reimportar do zero. */
+function limparComparativoTab(){
+  const data = comparativoDataFor(comparativoTab);
+  if(!data.principalRows && !data.tercRows) return;
+  if(!confirm(`Limpar os arquivos importados do Comparativo na aba ${convenioLabel(comparativoTab)}? Isso não apaga nenhum lançamento nem exame cadastrado — apenas os arquivos importados para esta conferência.`)) return;
+  comparativoState[comparativoTab] = { principalLab:'', principalArquivo:'', principalRows:null, tercLab:'', tercArquivo:'', tercRows:null };
+  render();
+  showToast('Comparação desta aba foi limpa.');
 }
 /* Para cada linha do arquivo TERCEIRIZADO, procura paciente+exame correspondente
    no arquivo PRINCIPAL. Retorna apenas as inconsistências (não encontrado, ou
@@ -1825,10 +1984,16 @@ function viewComparativo(){
       ${STATE.tiposConvenio.map(c=>`<div class="tab ${comparativoTab===c.key?'active':''}" onclick="setComparativoTab('${c.key}')">${esc(c.label)}</div>`).join('')}
     </div>
     <div class="helpbox">
-      Selecione o laboratório <b>Principal (Público)</b> e importe o arquivo dele; depois selecione o laboratório
-      <b>Terceirizado</b> e importe o arquivo dele. O sistema compara Paciente, Exame e Quantidade entre os dois
-      arquivos e lista, sempre com base no arquivo terceirizado, tudo que não foi encontrado (ou está com
-      quantidade diferente) no arquivo do laboratório principal. Esta conferência não é salva em Lançamentos.
+      <div class="flexrow" style="align-items:flex-start;">
+        <div>
+          Selecione o laboratório <b>Principal (Público)</b> e importe o arquivo dele; depois selecione o laboratório
+          <b>Terceirizado</b> e importe o arquivo dele. O sistema compara Paciente, Exame e Quantidade entre os dois
+          arquivos e lista, sempre com base no arquivo terceirizado, tudo que não foi encontrado (ou está com
+          quantidade diferente) no arquivo do laboratório principal. Esta conferência não é salva em Lançamentos —
+          reimportar um arquivo sempre SUBSTITUI o anterior daquele lado, nunca duplica.
+        </div>
+        ${(data.principalRows || data.tercRows) ? `<button class="btn ghost small" style="white-space:nowrap;" onclick="limparComparativoTab()">🗑 Limpar comparação desta aba</button>` : ''}
+      </div>
     </div>
 
     <div class="grid cols-2">
@@ -1841,7 +2006,7 @@ function viewComparativo(){
         </select></div>
         <input type="file" id="cmpFilePrincipal" accept=".xlsx,.xls,.csv,.docx,.txt" style="display:none" onchange="handleComparativoImport(event,'principal')">
         <button class="btn" onclick="document.getElementById('cmpFilePrincipal').click()">📥 Importar arquivo</button>
-        ${data.principalRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.principalArquivo)}</b> — ${fmtNum(data.principalRows.length)} registro(s) — Laboratório: <b>${esc(data.principalLab)}</b> &nbsp;<a href="#" onclick="resetComparativoLado('principal');return false;">(trocar arquivo)</a></div>` : ''}
+        ${data.principalRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.principalArquivo)}</b> — ${fmtNum(data.principalRows.length)} registro(s) — Laboratório: <b>${esc(data.principalLab)}</b> &nbsp;<button class="btn ghost small" style="padding:2px 6px;" onclick="resetComparativoLado('principal')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
         `}
       </div>
       <div class="card">
@@ -1853,7 +2018,7 @@ function viewComparativo(){
         </select></div>
         <input type="file" id="cmpFileTerc" accept=".xlsx,.xls,.csv,.docx,.txt" style="display:none" onchange="handleComparativoImport(event,'terceirizado')">
         <button class="btn" onclick="document.getElementById('cmpFileTerc').click()">📥 Importar arquivo</button>
-        ${data.tercRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.tercArquivo)}</b> — ${fmtNum(data.tercRows.length)} registro(s) — Laboratório: <b>${esc(data.tercLab)}</b> &nbsp;<a href="#" onclick="resetComparativoLado('terceirizado');return false;">(trocar arquivo)</a></div>` : ''}
+        ${data.tercRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.tercArquivo)}</b> — ${fmtNum(data.tercRows.length)} registro(s) — Laboratório: <b>${esc(data.tercLab)}</b> &nbsp;<button class="btn ghost small" style="padding:2px 6px;" onclick="resetComparativoLado('terceirizado')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
         `}
       </div>
     </div>
