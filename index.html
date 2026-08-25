@@ -214,6 +214,24 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
   </div>
 </div>
 
+<div id="loginScreen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:260;align-items:center;justify-content:center;padding:20px;">
+  <div class="card" style="max-width:400px;width:100%;">
+    <h2>🔐 Acesso ao sistema</h2>
+    <div class="subtitle">Informe seu usuário e senha para entrar no Controle de Exames Laboratoriais.</div>
+    <div class="field" style="margin-bottom:12px;">
+      <label>Usuário</label>
+      <input type="text" id="loginUsuario" placeholder="Ex.: joao" autocomplete="username" onkeydown="if(event.key==='Enter'){document.getElementById('loginSenha').focus();}">
+    </div>
+    <div class="field" style="margin-bottom:6px;">
+      <label>Senha</label>
+      <input type="password" id="loginSenha" placeholder="Digite sua senha" autocomplete="current-password" onkeydown="if(event.key==='Enter'){event.preventDefault();submitLogin();}">
+    </div>
+    <div id="loginErro" style="color:var(--red);font-size:12px;min-height:16px;margin-bottom:8px;"></div>
+    <button class="btn" style="width:100%;justify-content:center;" onclick="submitLogin()">Entrar</button>
+    <div class="muted" style="font-size:11.5px;margin-top:10px;">Cada usuário tem acesso individual. O administrador do sistema pode cadastrar novos usuários no módulo "Usuários".</div>
+  </div>
+</div>
+
 <div id="accessCodeScreen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:250;align-items:center;justify-content:center;padding:20px;">
   <div class="card" style="max-width:460px;width:100%;">
     <h2>🔐 Código de acesso</h2>
@@ -241,8 +259,10 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
     </div>
     <nav class="navlist" id="navlist"></nav>
     <div class="side-footer">
-      Seus dados ficam salvos automaticamente na nuvem (Firebase), vinculados ao seu código de acesso. Use o mesmo código em qualquer computador — inclusive do home office — para continuar de onde parou.
-      <div style="margin-top:6px;"><a href="#" onclick="trocarCodigoAcesso();return false;" style="color:#fff;opacity:.85;">Trocar código de acesso</a></div>
+      <div id="sidebarUsuarioLogado" style="font-weight:700;margin-bottom:4px;"></div>
+      Seus dados ficam salvos automaticamente na nuvem (Firebase). Use o mesmo computador/navegador de sempre — inclusive do home office — para continuar de onde parou.
+      <div style="margin-top:6px;"><a href="#" onclick="sairDoSistema();return false;" style="color:#fff;opacity:.85;">🚪 Sair do sistema</a></div>
+      <div style="margin-top:4px;"><a href="#" onclick="trocarCodigoAcesso();return false;" style="color:#fff;opacity:.6;font-size:10.5px;">Trocar código de acesso (avançado)</a></div>
     </div>
   </aside>
 
@@ -309,6 +329,134 @@ try{
 }catch(e){ console.error('Falha ao iniciar Firebase:', e); firebaseOk=false; }
 
 const FIRESTORE_COLLECTION = 'controle_exames_laboratoriais';
+
+/* ============================================================
+   USUÁRIOS / LOGIN / LOG DE ACESSO
+   Guardados em um documento fixo, separado dos dados de exames/
+   laboratórios/lançamentos (que continuam vinculados ao código de
+   acesso de sempre, sem nenhuma alteração). Isso garante que a troca
+   da tela de "código de acesso" pela tela de usuário/senha NUNCA
+   afete os dados já cadastrados.
+   ============================================================ */
+const FIRESTORE_USERS_DOC = '_sistema_usuarios_acessos';
+let USERS_STATE = { usuarios: [], logs: [] };
+let currentUser = null;       // {id, usuario, nome, master, senhaHash}
+let currentLogEntry = null;   // registro de log da sessão atual (usuário; data; hora início; hora final; comandos)
+let usersLoaded = false;
+
+async function hashSenha(senha){
+  try{
+    const enc = new TextEncoder().encode(String(senha));
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }catch(e){
+    // Fallback simples caso crypto.subtle não esteja disponível (ex.: navegador muito antigo)
+    let h = 0; const s = String(senha);
+    for(let i=0;i<s.length;i++){ h = ((h<<5)-h) + s.charCodeAt(i); h |= 0; }
+    return 'fb'+Math.abs(h).toString(16);
+  }
+}
+async function loadUsersState(){
+  if(!firebaseOk){ usersLoaded = true; return; }
+  try{
+    const doc = await db.collection(FIRESTORE_COLLECTION).doc(FIRESTORE_USERS_DOC).get();
+    if(doc.exists){
+      const dados = doc.data();
+      if(dados && dados.payload){
+        const parsed = JSON.parse(dados.payload);
+        USERS_STATE = Object.assign({usuarios:[],logs:[]}, parsed);
+      }
+    }
+  }catch(e){ console.error(e); }
+  await garantirUsuarioMaster();
+  usersLoaded = true;
+}
+/* Garante que o usuário administrador/master (João) sempre exista, sem nunca sobrescrever
+   ou apagar usuários já cadastrados. Só cria o usuário master na primeira vez, quando a
+   lista de usuários ainda não existir. */
+async function garantirUsuarioMaster(){
+  if(!Array.isArray(USERS_STATE.usuarios)) USERS_STATE.usuarios = [];
+  if(!Array.isArray(USERS_STATE.logs)) USERS_STATE.logs = [];
+  const existeJoao = USERS_STATE.usuarios.some(u=>u.usuario==='joao');
+  if(!existeJoao){
+    const senhaHash = await hashSenha('#Rnjc160274');
+    USERS_STATE.usuarios.push({ id: uid(), usuario:'joao', nome:'João', master:true, senhaHash, criadoEm:new Date().toISOString() });
+    saveUsersState(true);
+  }
+}
+let usersSaveTimer = null;
+function saveUsersState(imediato){
+  if(!firebaseOk) return;
+  const doSave = async ()=>{
+    try{
+      await db.collection(FIRESTORE_COLLECTION).doc(FIRESTORE_USERS_DOC).set({
+        payload: JSON.stringify(USERS_STATE),
+        atualizadoEm: new Date().toISOString()
+      });
+    }catch(e){ console.error(e); }
+  };
+  clearTimeout(usersSaveTimer);
+  if(imediato){ doSave(); } else { usersSaveTimer = setTimeout(doSave, 400); }
+}
+async function submitLogin(){
+  const usuarioInput = (document.getElementById('loginUsuario').value||'').trim().toLowerCase();
+  const senhaInput = document.getElementById('loginSenha').value||'';
+  const erroEl = document.getElementById('loginErro');
+  if(!usuarioInput || !senhaInput){ erroEl.textContent = 'Informe usuário e senha.'; return; }
+  const u = USERS_STATE.usuarios.find(x=>x.usuario===usuarioInput);
+  if(!u){ erroEl.textContent = 'Usuário ou senha inválidos.'; return; }
+  const hash = await hashSenha(senhaInput);
+  if(hash !== u.senhaHash){ erroEl.textContent = 'Usuário ou senha inválidos.'; return; }
+  erroEl.textContent = '';
+  iniciarSessaoUsuario(u);
+}
+function iniciarSessaoUsuario(u){
+  currentUser = u;
+  try{ sessionStorage.setItem('cel_logged_user', u.usuario); }catch(e){}
+  const agora = new Date();
+  currentLogEntry = {
+    id: uid(),
+    usuario: u.usuario,
+    nomeUsuario: u.nome || u.usuario,
+    data: agora.toLocaleDateString('pt-BR'),
+    horaInicio: agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),
+    horaFinal: '',
+    comandos: []
+  };
+  USERS_STATE.logs.push(currentLogEntry);
+  saveUsersState(true);
+  continuarBootAposLogin();
+}
+function continuarBootAposLogin(){
+  document.getElementById('loginScreen').style.display = 'none';
+  const code = getAccessCode();
+  if(!code){
+    document.getElementById('accessCodeScreen').style.display = 'flex';
+    return;
+  }
+  document.getElementById('loadingScreen').style.display = 'flex';
+  bootAfterAccessCode();
+}
+function registrarComando(nomeView){
+  if(!currentLogEntry) return;
+  const agora = new Date();
+  currentLogEntry.comandos.push(nomeView + ' ('+agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})+')');
+  currentLogEntry.horaFinal = agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  saveUsersState(false);
+}
+function finalizarSessaoAtual(){
+  if(currentLogEntry){
+    currentLogEntry.horaFinal = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+    saveUsersState(true);
+  }
+}
+window.addEventListener('beforeunload', finalizarSessaoAtual);
+function sairDoSistema(){
+  if(!confirm('Deseja sair do sistema?')) return;
+  finalizarSessaoAtual();
+  try{ sessionStorage.removeItem('cel_logged_user'); }catch(e){}
+  location.reload();
+}
 
 /* ---------------- Código de acesso (sincroniza entre computadores) ---------------- */
 function getAccessCode(){ return localStorage.getItem('cel_access_code') || ''; }
@@ -663,7 +811,7 @@ function usoCotaPrincipal(exameId){
 }
 
 /* ---------------- Navigation ---------------- */
-const NAV = [
+const NAV_BASE = [
   {group:'Visão Geral', items:[
     {id:'dashboard', label:'Dashboard', icon:'📊'},
   ]},
@@ -685,6 +833,15 @@ const NAV = [
     {id:'relatorios', label:'Relatórios', icon:'📁'},
   ]},
 ];
+const NAV_ADMIN = [
+  {group:'Administração', items:[
+    {id:'usuarios', label:'Usuários', icon:'👤'},
+    {id:'logAcesso', label:'Log de Acesso', icon:'📜'},
+  ]},
+];
+function getNav(){
+  return (currentUser && currentUser.master) ? NAV_BASE.concat(NAV_ADMIN) : NAV_BASE;
+}
 const PAGE_META = {
   dashboard:['Dashboard','Visão geral atualizada automaticamente com base nos lançamentos e no histórico.'],
   labs:['Cadastro de Laboratórios','Cadastre os laboratórios conveniados e seus contatos.'],
@@ -694,21 +851,27 @@ const PAGE_META = {
   nf:['Emissão de N.F.','Resumo de quantidades e valores para solicitar as notas fiscais dos laboratórios.'],
   comparativo:['Comparativo entre Laboratórios','Importe o arquivo do laboratório principal e do laboratório terceirizado e veja o relatório de inconsistências.'],
   relatorios:['Relatórios','Consolidado de todas as competências já fechadas.'],
+  usuarios:['Usuários','Cadastre usuários e senhas para acesso ao sistema. Apenas o administrador (master) vê este módulo.'],
+  logAcesso:['Log de Acesso','Veja quem usou o sistema: usuário, data, hora início, hora final e comandos acessados. Apenas o administrador (master) vê este módulo.'],
 };
 
 function renderNav(){
   const nav = document.getElementById('navlist');
-  nav.innerHTML = NAV.map(g=>`
+  nav.innerHTML = getNav().map(g=>`
     <div class="navgroup-label">${g.group}</div>
     ${g.items.map(it=>`<div class="navitem ${currentView===it.id?'active':''}" onclick="goto('${it.id}')"><span class="ic">${it.icon}</span>${it.label}</div>`).join('')}
   `).join('');
+  const userEl = document.getElementById('sidebarUsuarioLogado');
+  if(userEl) userEl.textContent = currentUser ? ('👤 '+(currentUser.nome||currentUser.usuario)+(currentUser.master?' (admin)':'')) : '';
 }
 function goto(view){
+  if((view==='usuarios' || view==='logAcesso') && !(currentUser && currentUser.master)) view = 'dashboard';
   currentView = view;
   document.getElementById('pageTitle').textContent = PAGE_META[view][0];
   document.getElementById('pageDesc').textContent = PAGE_META[view][1];
   document.getElementById('sidebar').classList.remove('open');
   renderNav();
+  registrarComando(PAGE_META[view][0]);
   render();
 }
 
@@ -724,6 +887,8 @@ function render(){
   else if(currentView==='nf') v.innerHTML = viewNF();
   else if(currentView==='comparativo') v.innerHTML = viewComparativo();
   else if(currentView==='relatorios') v.innerHTML = viewRelatorios();
+  else if(currentView==='usuarios') v.innerHTML = viewUsuarios();
+  else if(currentView==='logAcesso') v.innerHTML = viewLogAcesso();
   afterRender();
 }
 function afterRender(){
@@ -851,6 +1016,7 @@ function drawDashboardCharts(){
    CADASTRO DE LABORATÓRIOS
    ============================================================ */
 let editingLabId = null;
+let editingExameId = null;
 /* Rótulo/badge do campo "natureza" (Principal/Público ou Terceirizado). Registros
    cadastrados antes deste campo existir não têm esse valor definido — nesse caso
    exibimos "Não informado" em vez de presumir um valor, sem alterar o dado salvo. */
@@ -965,24 +1131,32 @@ function sortLabs(){
    CADASTRO DE EXAMES
    ============================================================ */
 function viewExames(){
-  const labsOpts = labsForSelect().map(l=>`<option value="${esc(l.nome)}">${esc(l.nome)}</option>`).join('');
+  const editing = editingExameId ? STATE.exames.find(e=>e.id===editingExameId) : null;
+  const labsOpts = labsForSelect().map(l=>`<option value="${esc(l.nome)}" ${editing && editing.laboratorio===l.nome?'selected':''}>${esc(l.nome)}</option>`).join('');
   return `
     <div class="card">
-      <h2>Novo exame</h2>
-      <div class="subtitle">Defina a cota principal e a cota reserva — o lançamento consome a cota principal primeiro e depois a reserva, automaticamente.</div>
+      <h2>${editing ? '✏️ Editar exame' : 'Novo exame'}</h2>
+      <div class="subtitle">${editing ? 'Altere os dados e clique em salvar. Lançamentos já registrados com este exame não são afetados pelo novo valor unitário — só os próximos lançamentos usarão o valor atualizado.' : 'Defina a cota principal e a cota reserva — o lançamento consome a cota principal primeiro e depois a reserva, automaticamente.'}</div>
       <div class="formgrid">
-        <div class="field"><label>Status</label><select id="exTipo"><option value="ATIVO">Ativo</option><option value="INATIVO">Inativo</option></select></div>
-        <div class="field" style="grid-column:span 2;"><label>Descrição do exame</label><input id="exDescricao" placeholder="Ex: Ácido Fólico"></div>
+        <div class="field"><label>Status</label><select id="exTipo">
+          <option value="ATIVO" ${editing && editing.tipo==='ATIVO'?'selected':''}>Ativo</option>
+          <option value="INATIVO" ${editing && editing.tipo==='INATIVO'?'selected':''}>Inativo</option>
+        </select></div>
+        <div class="field" style="grid-column:span 2;"><label>Descrição do exame</label><input id="exDescricao" placeholder="Ex: Ácido Fólico" value="${editing?esc(editing.descricao):''}"></div>
         <div class="field"><label>Laboratório</label><select id="exLab">${labsOpts || '<option value="">Cadastre um laboratório primeiro</option>'}</select></div>
         <div class="field"><label>Tipo de convênio/processo</label><select id="exConvenio">
-          ${STATE.tiposConvenio.map(t=>`<option value="${esc(t.cadastroValue)}">${esc(t.label)}</option>`).join('')}
+          ${STATE.tiposConvenio.map(t=>`<option value="${esc(t.cadastroValue)}" ${editing && editing.convenio===t.cadastroValue?'selected':''}>${esc(t.label)}</option>`).join('')}
         </select></div>
-        <div class="field"><label>Período (vigência)</label><input id="exPeriodo" placeholder="Ex: 2026/2027"></div>
-        <div class="field"><label>Qtd. cota principal</label><input id="exCotaP" type="number" min="0" value="0"></div>
-        <div class="field"><label>Qtd. cota reserva</label><input id="exCotaR" type="number" min="0" value="0"></div>
-        <div class="field"><label>Valor unitário (R$)</label><input id="exValor" type="number" min="0" step="0.01" value="0"></div>
+        <div class="field"><label>Período (vigência)</label><input id="exPeriodo" placeholder="Ex: 2026/2027" value="${editing?esc(editing.periodo):''}"></div>
+        <div class="field"><label>Qtd. cota principal</label><input id="exCotaP" type="number" min="0" value="${editing?editing.cotaPrincipal:0}"></div>
+        <div class="field"><label>Qtd. cota reserva</label><input id="exCotaR" type="number" min="0" value="${editing?editing.cotaReserva:0}"></div>
+        <div class="field"><label>Valor unitário (R$)</label><input id="exValor" type="number" min="0" step="0.01" value="${editing?editing.valorUnit:0}"></div>
       </div>
-      <div style="margin-top:14px;"><button class="btn" onclick="addExame()">+ Adicionar exame</button></div>
+      <div style="margin-top:14px;display:flex;gap:8px;">
+        ${editing
+          ? `<button class="btn" onclick="saveExame()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditExame()">Cancelar</button>`
+          : `<button class="btn" onclick="saveExame()">+ Adicionar exame</button>`}
+      </div>
     </div>
     ${findReplacePanel('exames', [
       {key:'descricao',label:'Descrição'},{key:'laboratorio',label:'Laboratório'},{key:'convenio',label:'Convênio'},{key:'periodo',label:'Período'}
@@ -1021,7 +1195,7 @@ function renderExamesRows(){
       <td class="right">${fmtNum(usada)}</td>
       <td class="right">${fmtNum(e.cotaReserva)}</td>
       <td class="right">${fmtMoney(e.valorUnit)}</td>
-      <td><button class="btn ghost small" onclick="deleteExame('${e.id}')">🗑</button></td>
+      <td><button class="btn ghost small" onclick="editExame('${e.id}')">✏️ editar</button> <button class="btn ghost small" onclick="deleteExame('${e.id}')">🗑</button></td>
     </tr>`;
   }).join('');
 }
@@ -1060,28 +1234,49 @@ function removeApelido(id, idx){
   ex.apelidos.splice(idx,1);
   saveState(); render();
 }
-function addExame(){
+function saveExame(){
   const descricao = document.getElementById('exDescricao').value.trim();
   const laboratorio = document.getElementById('exLab').value;
   if(!descricao){ showToast('Informe a descrição do exame.'); return; }
   if(!laboratorio){ showToast('Cadastre e selecione um laboratório.'); return; }
-  STATE.exames.push({
-    id: uid(),
+  const dados = {
     tipo: document.getElementById('exTipo').value,
     descricao,
-    apelidos: [],
     laboratorio,
     convenio: document.getElementById('exConvenio').value,
     periodo: document.getElementById('exPeriodo').value.trim(),
     cotaPrincipal: Number(document.getElementById('exCotaP').value)||0,
     cotaReserva: Number(document.getElementById('exCotaR').value)||0,
     valorUnit: Number(document.getElementById('exValor').value)||0,
-  });
-  saveState(); render(); showToast('Exame adicionado.');
+  };
+  if(editingExameId){
+    const ex = STATE.exames.find(e=>e.id===editingExameId);
+    if(!ex){ editingExameId=null; render(); return; }
+    Object.assign(ex, dados);
+    // Atualiza a descrição já usada em lançamentos existentes (mesmo comportamento do
+    // "Localizar, substituir e excluir"), sem alterar quantidades ou valores já lançados.
+    STATE.lancamentos.forEach(l=>{ if(l.exameId===ex.id) l.exameDescricao=ex.descricao; });
+    editingExameId = null;
+    saveState(); render(); showToast('Exame atualizado. Lançamentos já registrados não foram alterados; apenas os próximos usarão os novos dados.');
+  } else {
+    STATE.exames.push({ id: uid(), apelidos: [], ...dados });
+    saveState(); render(); showToast('Exame adicionado.');
+  }
+}
+function editExame(id){
+  editingExameId = id;
+  render();
+  const el = document.getElementById('exDescricao');
+  if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
+}
+function cancelEditExame(){
+  editingExameId = null;
+  render();
 }
 function deleteExame(id){
   if(!confirm('Excluir este exame do cadastro?')) return;
   STATE.exames = STATE.exames.filter(e=>e.id!==id);
+  if(editingExameId===id) editingExameId = null;
   saveState(); render();
 }
 function sortExames(){
@@ -1255,12 +1450,13 @@ function viewLancamento(){
         </div>
       </div>
       <div class="table-wrap" style="margin-top:10px;"><table>
-        <thead><tr><th>Paciente</th><th>Data</th><th>Exame</th><th>Laboratório</th><th>Unidade</th><th>Resultado</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Vlr. Unit.</th><th class="right">Vlr. Total</th><th></th></tr></thead>
+        <thead><tr><th>Paciente</th><th>Data</th><th class="right">Vlr. Unit.</th><th>Exame</th><th>Laboratório</th><th>Unidade</th><th>Resultado</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Vlr. Total</th><th></th></tr></thead>
         <tbody>
           ${lancsTab.length===0 ? `<tr class="empty-row"><td colspan="12">Nenhum lançamento nesta competência ainda.</td></tr>` :
             lancsTab.map(l=>`<tr>
               <td>${esc(l.paciente)}</td>
               <td>${esc(l.data)}</td>
+              <td class="right">${fmtMoney(l.valorUnit)}</td>
               <td>${esc(l.exameDescricao)}</td>
               <td>${esc(l.laboratorio)}</td>
               <td>${esc(l.unidade)||'—'}</td>
@@ -1268,12 +1464,11 @@ function viewLancamento(){
               <td class="right">${fmtNum(l.quantidade)}</td>
               <td class="right">${fmtNum(l.qtdCP)}</td>
               <td class="right">${fmtNum(l.qtdCR)}</td>
-              <td class="right">${fmtMoney(l.valorUnit)}</td>
               <td class="right"><b>${fmtMoney(l.valorTotal)}</b></td>
               <td><button class="btn ghost small" onclick="deleteLancamento('${l.id}')">🗑</button></td>
             </tr>`).join('')}
         </tbody>
-        ${lancsTab.length>0 ? `<tfoot><tr><td colspan="6">TOTAL GERAL</td><td class="right">${fmtNum(totQtd)}</td><td class="right">${fmtNum(totCP)}</td><td class="right">${fmtNum(totCR)}</td><td></td><td class="right">${fmtMoney(totValor)}</td><td></td></tr></tfoot>`:''}
+        ${lancsTab.length>0 ? `<tfoot><tr><td colspan="7">TOTAL GERAL</td><td class="right">${fmtNum(totQtd)}</td><td class="right">${fmtNum(totCP)}</td><td class="right">${fmtNum(totCR)}</td><td class="right">${fmtMoney(totValor)}</td><td></td></tr></tfoot>`:''}
       </table></div>
     </div>
   `;
@@ -1417,6 +1612,14 @@ function exameCasaComTexto(exame, texto){
    OFICIAL/cadastrada correspondente — usado para "normalizar" nomes diferentes de um mesmo
    exame antes de comparar dois arquivos entre si (Comparativo entre Laboratórios). Se nenhum
    exame cadastrado corresponder, devolve o próprio nome original, sem alterá-lo. */
+/* Tenta localizar, entre os exames cadastrados, o valor unitário correspondente a um nome
+   de exame vindo de um arquivo importado (reconhecendo descrição oficial ou apelidos).
+   Usado apenas para exibição no Comparativo entre Laboratórios — não altera nenhum dado. */
+function valorUnitPorNomeExame(nome){
+  if(!nome) return null;
+  const ex = STATE.exames.find(e => exameCasaComTexto(e, nome));
+  return ex ? ex.valorUnit : null;
+}
 function canonicalizeExameNome(nome){
   const nt = normTxt(nome);
   if(!nt) return nome;
@@ -2047,15 +2250,16 @@ function renderComparativoReport(data, inconsistencias){
         </div>
         ${inconsistencias.length===0 ? `<div class="helpbox">Nenhuma inconsistência encontrada — todos os registros do arquivo terceirizado foram localizados no arquivo principal, com a mesma quantidade.</div>` : `
         <div class="table-wrap"><table>
-          <thead><tr><th>Paciente</th><th>Exame</th><th class="right">Qtd (Terceirizado)</th><th class="right">Qtd (Principal)</th><th>Situação</th></tr></thead>
+          <thead><tr><th>Paciente</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd (Terceirizado)</th><th class="right">Qtd (Principal)</th><th>Situação</th></tr></thead>
           <tbody>
-            ${inconsistencias.map(i=>`<tr>
+            ${inconsistencias.map(i=>{ const vu = valorUnitPorNomeExame(i.exame); return `<tr>
               <td>${esc(i.paciente)||'—'}</td>
+              <td class="right">${vu===null?'—':fmtMoney(vu)}</td>
               <td>${esc(i.exame)||'—'}</td>
               <td class="right">${fmtNum(i.quantidade)}</td>
               <td class="right">${i.qtdPrincipal===null?'—':fmtNum(i.qtdPrincipal)}</td>
               <td><span class="badge ${i.situacao==='NAO_ENCONTRADO'?'inativo':'terceirizado'}">${i.situacao==='NAO_ENCONTRADO'?'Não encontrado no principal':'Quantidade divergente'}</span></td>
-            </tr>`).join('')}
+            </tr>`;}).join('')}
           </tbody>
         </table></div>
         `}
@@ -2213,6 +2417,7 @@ function groupRows(rows){
       g.qtdCP = cp;
       g.qtdCR = cr;
       const avgUnit = g.qtd>0 ? (g.valor/g.qtd) : 0;
+      g.valorUnitMedio = avgUnit;
       g.valorCP = round2(cp*avgUnit);
       g.valorCR = round2(g.valor - g.valorCP); // resto, garante soma exata com o total
     });
@@ -2223,12 +2428,12 @@ function renderCustomReportTable(rows){
   if(rows.length===0) return `<div class="helpbox">Nenhum registro encontrado para os filtros selecionados.</div>`;
   if(reportSubTab==='detalhado'){
     return `<div class="table-wrap"><table>
-      <thead><tr><th>Competência</th><th>Convênio</th><th>Laboratório</th><th>Paciente</th><th>Exame</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Vlr Unit.</th><th class="right">Valor</th></tr></thead>
+      <thead><tr><th>Competência</th><th>Convênio</th><th>Laboratório</th><th>Paciente</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
       <tbody>${rows.map(r=>`<tr>
         <td>${esc(r.competencia)}/${esc(r.ano)}</td><td><span class="badge ${convenioBadge(r.convenio)}">${convenioLabel(r.convenio)}</span></td>
-        <td>${esc(r.laboratorio)}</td><td>${esc(r.paciente)}</td><td>${esc(r.exameDescricao)}</td>
+        <td>${esc(r.laboratorio)}</td><td>${esc(r.paciente)}</td><td class="right">${fmtMoney(r.valorUnit)}</td><td>${esc(r.exameDescricao)}</td>
         <td class="right">${fmtNum(r.qtdExibida)}</td><td class="right">${fmtNum(r.qtdCP)}</td><td class="right">${fmtNum(r.qtdCR)}</td>
-        <td class="right">${fmtMoney(r.valorUnit)}</td><td class="right"><b>${fmtMoney(r.valorExibido)}</b></td>
+        <td class="right"><b>${fmtMoney(r.valorExibido)}</b></td>
       </tr>`).join('')}</tbody>
     </table></div>`;
   }
@@ -2243,15 +2448,15 @@ function renderCustomReportTable(rows){
     const totValorCR = list.reduce((s,g)=>s+g.valorCR,0);
     const totValor = list.reduce((s,g)=>s+g.valor,0);
     return `<div class="table-wrap"><table>
-      <thead><tr><th>Exame</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Valor C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor C.R.</th><th class="right">Valor Total</th></tr></thead>
+      <thead><tr><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Valor C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor C.R.</th><th class="right">Valor Total</th></tr></thead>
       <tbody>${list.map(g=>`<tr>
-        <td><b>${esc(g.chave)}</b></td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td>
+        <td class="right">${fmtMoney(g.valorUnitMedio||0)}</td><td><b>${esc(g.chave)}</b></td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td>
         <td class="right">${fmtNum(g.qtdCP)}</td><td class="right">${fmtMoney(g.valorCP)}</td>
         <td class="right">${fmtNum(g.qtdCR)}</td><td class="right">${fmtMoney(g.valorCR)}</td>
         <td class="right"><b>${fmtMoney(g.valor)}</b></td>
       </tr>`).join('')}</tbody>
       <tfoot><tr>
-        <td>TOTAL</td><td class="right">${fmtNum(totRegistros)}</td><td class="right">${fmtNum(totQtd)}</td>
+        <td></td><td>TOTAL</td><td class="right">${fmtNum(totRegistros)}</td><td class="right">${fmtNum(totQtd)}</td>
         <td class="right">${fmtNum(totQtdCP)}</td><td class="right">${fmtMoney(totValorCP)}</td>
         <td class="right">${fmtNum(totQtdCR)}</td><td class="right">${fmtMoney(totValorCR)}</td>
         <td class="right">${fmtMoney(totValor)}</td>
@@ -2457,6 +2662,122 @@ function importAllData(event){
   reader.readAsText(file);
 }
 
+/* ============================================================
+   CADASTRO DE USUÁRIOS (módulo do administrador/master)
+   ============================================================ */
+let editingUsuarioId = null;
+function viewUsuarios(){
+  if(!(currentUser && currentUser.master)) return `<div class="card">Acesso restrito ao administrador do sistema.</div>`;
+  const editing = editingUsuarioId ? USERS_STATE.usuarios.find(u=>u.id===editingUsuarioId) : null;
+  return `
+    <div class="card">
+      <h2>${editing ? '✏️ Editar usuário' : 'Novo usuário'}</h2>
+      <div class="subtitle">${editing ? 'Deixe a senha em branco para manter a senha atual.' : 'Cadastre um novo usuário para acessar o sistema.'}</div>
+      <div class="formgrid">
+        <div class="field"><label>Usuário (login)</label><input id="usrUsuario" placeholder="Ex: maria" value="${editing?esc(editing.usuario):''}" ${editing?'disabled':''}></div>
+        <div class="field"><label>Nome completo</label><input id="usrNome" placeholder="Ex: Maria Silva" value="${editing?esc(editing.nome):''}"></div>
+        <div class="field"><label>Senha</label><input id="usrSenha" type="password" placeholder="${editing?'(manter atual)':'Digite a senha'}"></div>
+        <div class="field"><label>Perfil</label><select id="usrMaster">
+          <option value="0" ${editing && !editing.master?'selected':''}>Usuário comum</option>
+          <option value="1" ${editing && editing.master?'selected':''}>Administrador (master)</option>
+        </select></div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;">
+        ${editing
+          ? `<button class="btn" onclick="saveUsuario()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditUsuario()">Cancelar</button>`
+          : `<button class="btn" onclick="saveUsuario()">+ Adicionar usuário</button>`}
+      </div>
+    </div>
+    <div class="card">
+      <h2>Usuários cadastrados</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Usuário</th><th>Nome</th><th>Perfil</th><th></th></tr></thead>
+        <tbody>
+          ${USERS_STATE.usuarios.length===0 ? `<tr class="empty-row"><td colspan="4">Nenhum usuário cadastrado.</td></tr>` :
+            USERS_STATE.usuarios.map(u=>`
+            <tr>
+              <td><b>${esc(u.usuario)}</b></td>
+              <td>${esc(u.nome)||'—'}</td>
+              <td>${u.master?'<span class="badge ativo">Administrador</span>':'<span class="badge naoinformado">Usuário comum</span>'}</td>
+              <td>
+                <button class="btn ghost small" onclick="editUsuario('${u.id}')">✏️ editar</button>
+                <button class="btn ghost small" onclick="deleteUsuario('${u.id}')">🗑 excluir</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+async function saveUsuario(){
+  if(!(currentUser && currentUser.master)) return;
+  const usuarioRaw = document.getElementById('usrUsuario').value.trim().toLowerCase();
+  const nome = document.getElementById('usrNome').value.trim();
+  const senha = document.getElementById('usrSenha').value;
+  const master = document.getElementById('usrMaster').value === '1';
+  if(editingUsuarioId){
+    const u = USERS_STATE.usuarios.find(x=>x.id===editingUsuarioId);
+    if(!u){ editingUsuarioId=null; render(); return; }
+    u.nome = nome;
+    u.master = master;
+    if(senha){ u.senhaHash = await hashSenha(senha); }
+    editingUsuarioId = null;
+    saveUsersState(true); render(); showToast('Usuário atualizado.');
+  } else {
+    if(!usuarioRaw || usuarioRaw.length<3){ showToast('Informe um usuário (login) com pelo menos 3 caracteres.'); return; }
+    if(!senha || senha.length<4){ showToast('Informe uma senha com pelo menos 4 caracteres.'); return; }
+    if(USERS_STATE.usuarios.some(u=>u.usuario===usuarioRaw)){ showToast('Já existe um usuário com esse login.'); return; }
+    const senhaHash = await hashSenha(senha);
+    USERS_STATE.usuarios.push({ id: uid(), usuario:usuarioRaw, nome, master, senhaHash, criadoEm:new Date().toISOString() });
+    saveUsersState(true); render(); showToast('Usuário adicionado.');
+  }
+}
+function editUsuario(id){
+  editingUsuarioId = id;
+  render();
+}
+function cancelEditUsuario(){
+  editingUsuarioId = null;
+  render();
+}
+function deleteUsuario(id){
+  const u = USERS_STATE.usuarios.find(x=>x.id===id);
+  if(!u) return;
+  if(u.usuario==='joao'){ showToast('O usuário administrador principal (joao) não pode ser excluído.'); return; }
+  if(!confirm(`Excluir o usuário "${u.usuario}"? Ele não poderá mais acessar o sistema.`)) return;
+  USERS_STATE.usuarios = USERS_STATE.usuarios.filter(x=>x.id!==id);
+  if(editingUsuarioId===id) editingUsuarioId = null;
+  saveUsersState(true); render();
+}
+
+/* ============================================================
+   LOG DE ACESSO (módulo do administrador/master)
+   ============================================================ */
+function viewLogAcesso(){
+  if(!(currentUser && currentUser.master)) return `<div class="card">Acesso restrito ao administrador do sistema.</div>`;
+  const logs = USERS_STATE.logs.slice().reverse();
+  return `
+    <div class="card">
+      <h2>📜 Log de Acesso</h2>
+      <div class="subtitle">Registro de quem usou o sistema: usuário, data, hora de início, hora final e os módulos/comandos acessados em cada sessão.</div>
+      <div class="table-wrap" style="max-height:600px;"><table>
+        <thead><tr><th>Usuário</th><th>Data</th><th>Hora Início</th><th>Hora Final</th><th>Comandos acessados</th></tr></thead>
+        <tbody>
+          ${logs.length===0 ? `<tr class="empty-row"><td colspan="5">Nenhum acesso registrado ainda.</td></tr>` :
+            logs.map(l=>`
+            <tr>
+              <td><b>${esc(l.nomeUsuario||l.usuario)}</b></td>
+              <td>${esc(l.data)}</td>
+              <td>${esc(l.horaInicio)}</td>
+              <td>${esc(l.horaFinal)||'—'}</td>
+              <td style="white-space:normal;min-width:260px;">${(l.comandos&&l.comandos.length) ? esc(l.comandos.join(' → ')) : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+
 /* ---------------- Boot ---------------- */
 document.getElementById('menuBtn').addEventListener('click', ()=>{
   document.getElementById('sidebar').classList.toggle('open');
@@ -2469,19 +2790,25 @@ async function bootAfterAccessCode(){
   goto('dashboard');
 }
 
+async function iniciarComLogin(){
+  await loadUsersState();
+  document.getElementById('loadingScreen').style.display = 'none';
+  let usuarioSalvo = null;
+  try{ usuarioSalvo = sessionStorage.getItem('cel_logged_user'); }catch(e){}
+  if(usuarioSalvo){
+    const u = USERS_STATE.usuarios.find(x=>x.usuario===usuarioSalvo);
+    if(u){ iniciarSessaoUsuario(u); return; }
+  }
+  document.getElementById('loginScreen').style.display = 'flex';
+}
+
 (function init(){
   if(!firebaseOk){
     document.getElementById('loadingScreen').style.display = 'none';
     document.getElementById('configScreen').style.display = 'flex';
     return;
   }
-  const code = getAccessCode();
-  if(!code){
-    document.getElementById('loadingScreen').style.display = 'none';
-    document.getElementById('accessCodeScreen').style.display = 'flex';
-    return;
-  }
-  bootAfterAccessCode();
+  iniciarComLogin();
 })();
 </script>
 </body>
