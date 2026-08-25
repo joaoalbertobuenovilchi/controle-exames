@@ -158,6 +158,7 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 @keyframes spin{to{transform:rotate(360deg);}}
 .section-title{font-size:16px;font-weight:800;margin:26px 0 10px;color:var(--teal-dark);}
 .muted{color:var(--ink-soft);}
+.apelido-mini{color:var(--ink-soft);font-size:10.5px;font-weight:400;margin-top:1px;}
 .right{text-align:right;}
 
 /* Cabeçalho padrão dos relatórios */
@@ -1508,7 +1509,7 @@ function viewLancamento(){
               <td>${esc(l.paciente)}</td>
               <td>${esc(l.data)}</td>
               <td class="right">${fmtMoney(l.valorUnit)}</td>
-              <td>${esc(l.exameDescricao)}</td>
+              <td>${exameCellHTML(l.exameId, l.exameDescricao)}</td>
               <td>${esc(l.laboratorio)}</td>
               <td>${esc(l.unidade)||'—'}</td>
               <td>${esc(l.resultado)}</td>
@@ -1670,6 +1671,25 @@ function valorUnitPorNomeExame(nome){
   if(!nome) return null;
   const ex = STATE.exames.find(e => exameCasaComTexto(e, nome));
   return ex ? ex.valorUnit : null;
+}
+/* Resolve o exame ATUAL (nome e apelidos vigentes hoje no módulo Exames) a partir de um
+   lançamento antigo — primeiro tenta pelo exameId (vínculo direto), e se não achar (ex.:
+   lançamentos muito antigos, importados, ou o exame foi excluído), tenta reconhecer pelo
+   texto salvo na época, usando descrição/apelidos cadastrados. Isso é só para EXIBIÇÃO nos
+   relatórios; nunca reescreve o que já foi lançado/importado. */
+function resolveExameAtual(exameId, textoAntigo){
+  let ex = null;
+  if(exameId) ex = STATE.exames.find(e=>e.id===exameId);
+  if(!ex && textoAntigo) ex = STATE.exames.find(e=>exameCasaComTexto(e, textoAntigo));
+  if(ex) return { nome: ex.descricao, apelidos: ex.apelidos||[] };
+  return { nome: textoAntigo||'', apelidos: [] };
+}
+/* Monta o HTML de uma célula de "Exame" nos relatórios: nome atual em destaque e,
+   embaixo, os apelidos/nomes alternativos cadastrados em letra menor. */
+function exameCellHTML(exameId, textoAntigo){
+  const r = resolveExameAtual(exameId, textoAntigo);
+  const apelidosHTML = r.apelidos.length ? `<div class="apelido-mini">${esc(r.apelidos.join(', '))}</div>` : '';
+  return `<b>${esc(r.nome)}</b>${apelidosHTML}`;
 }
 function canonicalizeExameNome(nome){
   const nt = normTxt(nome);
@@ -2306,7 +2326,7 @@ function renderComparativoReport(data, inconsistencias){
             ${inconsistencias.map(i=>{ const vu = valorUnitPorNomeExame(i.exame); return `<tr>
               <td>${esc(i.paciente)||'—'}</td>
               <td class="right">${vu===null?'—':fmtMoney(vu)}</td>
-              <td>${esc(i.exame)||'—'}</td>
+              <td>${i.exame ? exameCellHTML(null, i.exame) : '—'}</td>
               <td class="right">${fmtNum(i.quantidade)}</td>
               <td class="right">${i.qtdPrincipal===null?'—':fmtNum(i.qtdPrincipal)}</td>
               <td><span class="badge ${i.situacao==='NAO_ENCONTRADO'?'inativo':'terceirizado'}">${i.situacao==='NAO_ENCONTRADO'?'Não encontrado no principal':'Quantidade divergente'}</span></td>
@@ -2429,7 +2449,7 @@ function viewRelatorioPersonalizado(){
   </div>`;
 }
 function groupKeyFn(){
-  if(reportSubTab==='porExame') return r=>r.exameDescricao||'(sem exame)';
+  if(reportSubTab==='porExame') return r=>resolveExameAtual(r.exameId, r.exameDescricao).nome || '(sem exame)';
   if(reportSubTab==='porPaciente') return r=>r.paciente||'(sem paciente)';
   if(reportSubTab==='porLab') return r=>r.laboratorio||'(sem laboratório)';
   if(reportSubTab==='porMes') return r=>r.competencia+'/'+r.ano;
@@ -2453,7 +2473,7 @@ function groupRows(rows){
   const map = new Map();
   rows.forEach(r=>{
     const k = keyFn(r);
-    if(!map.has(k)) map.set(k,{qtd:0,qtdCP:0,qtdCR:0,valor:0,registros:0});
+    if(!map.has(k)) map.set(k,{qtd:0,qtdCP:0,qtdCR:0,valor:0,registros:0,apelidos:(reportSubTab==='porExame'?(resolveExameAtual(r.exameId, r.exameDescricao).apelidos||[]):[])});
     const g = map.get(k);
     g.qtd+=r.qtdExibida; g.qtdCP+=r.qtdCP; g.qtdCR+=r.qtdCR; g.valor+=r.valorExibido; g.registros++;
   });
@@ -2482,7 +2502,7 @@ function renderCustomReportTable(rows){
       <thead><tr><th>Competência</th><th>Convênio</th><th>Laboratório</th><th>Paciente</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
       <tbody>${rows.map(r=>`<tr>
         <td>${esc(r.competencia)}/${esc(r.ano)}</td><td><span class="badge ${convenioBadge(r.convenio)}">${convenioLabel(r.convenio)}</span></td>
-        <td>${esc(r.laboratorio)}</td><td>${esc(r.paciente)}</td><td class="right">${fmtMoney(r.valorUnit)}</td><td>${esc(r.exameDescricao)}</td>
+        <td>${esc(r.laboratorio)}</td><td>${esc(r.paciente)}</td><td class="right">${fmtMoney(r.valorUnit)}</td><td>${exameCellHTML(r.exameId, r.exameDescricao)}</td>
         <td class="right">${fmtNum(r.qtdExibida)}</td><td class="right">${fmtNum(r.qtdCP)}</td><td class="right">${fmtNum(r.qtdCR)}</td>
         <td class="right"><b>${fmtMoney(r.valorExibido)}</b></td>
       </tr>`).join('')}</tbody>
@@ -2501,7 +2521,7 @@ function renderCustomReportTable(rows){
     return `<div class="table-wrap"><table>
       <thead><tr><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Valor C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor C.R.</th><th class="right">Valor Total</th></tr></thead>
       <tbody>${list.map(g=>`<tr>
-        <td class="right">${fmtMoney(g.valorUnitMedio||0)}</td><td><b>${esc(g.chave)}</b></td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td>
+        <td class="right">${fmtMoney(g.valorUnitMedio||0)}</td><td><b>${esc(g.chave)}</b>${g.apelidos&&g.apelidos.length?`<div class="apelido-mini">${esc(g.apelidos.join(', '))}</div>`:''}</td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td>
         <td class="right">${fmtNum(g.qtdCP)}</td><td class="right">${fmtMoney(g.valorCP)}</td>
         <td class="right">${fmtNum(g.qtdCR)}</td><td class="right">${fmtMoney(g.valorCR)}</td>
         <td class="right"><b>${fmtMoney(g.valor)}</b></td>
