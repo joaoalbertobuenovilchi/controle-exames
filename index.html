@@ -182,7 +182,7 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
   html, body{ background:#fff !important; }
   body *{ visibility:hidden; }
   .print-target, .print-target *{ visibility:visible; }
-  .print-target{ position:absolute; left:0; top:0; width:100%; margin:0; padding:0; border:none; box-shadow:none; background:#fff; }
+  .print-target{ position:absolute; left:0; top:0; width:100%; margin:0; padding:0; border:none; box-shadow:none; background:#fff; display:block !important; }
   .print-timestamp{ display:block; font-size:10px; color:#666; text-align:right; margin-bottom:8px; }
   .print-target .table-wrap{ max-height:none !important; overflow:visible !important; border:none !important; }
   .print-target table{ font-size:11px; width:100%; }
@@ -663,6 +663,26 @@ function printReport(targetId){
   el.classList.add('print-target');
   setTimeout(()=>{ window.print(); }, 60);
 }
+/* Igual a printReport, mas força a folha A4 no modo PAISAGEM (deitada) durante esta
+   impressão específica, para caber mais colunas — usado, por exemplo, na lista completa
+   de exames cadastrados. Depois de imprimir, a orientação volta ao padrão (retrato/o que
+   o usuário escolher) para os demais relatórios. */
+function printReportLandscape(targetId){
+  const el = document.getElementById(targetId);
+  if(!el){ showToast('Nada para imprimir.'); return; }
+  let styleTag = document.getElementById('tempLandscapeStyle');
+  if(!styleTag){
+    styleTag = document.createElement('style');
+    styleTag.id = 'tempLandscapeStyle';
+    document.head.appendChild(styleTag);
+  }
+  styleTag.innerHTML = '@media print{ @page{ size: A4 landscape; margin: 10mm; } }';
+  printReport(targetId);
+}
+window.addEventListener('afterprint', ()=>{
+  const styleTag = document.getElementById('tempLandscapeStyle');
+  if(styleTag) styleTag.remove();
+});
 window.addEventListener('afterprint', ()=>{
   document.querySelectorAll('.print-target').forEach(n=>n.classList.remove('print-target'));
 });
@@ -1162,7 +1182,13 @@ function viewExames(){
       {key:'descricao',label:'Descrição'},{key:'laboratorio',label:'Laboratório'},{key:'convenio',label:'Convênio'},{key:'periodo',label:'Período'}
     ], frMatchExames, 'frDeleteExames', 'frReplaceExames')}
     <div class="card">
-      <div class="flexrow"><h2 class="sortable-title" style="margin:0;" onclick="sortExames()" title="Clique para colocar em ordem alfabética">Exames cadastrados <span class="sort-ic">⇅ A-Z</span></h2><input id="exFiltro" placeholder="Filtrar por descrição, apelido ou laboratório…" style="max-width:280px;padding:7px 10px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;" oninput="debouncedRender()"></div>
+      <div class="flexrow">
+        <h2 class="sortable-title" style="margin:0;" onclick="sortExames()" title="Clique para colocar em ordem alfabética">Exames cadastrados <span class="sort-ic">⇅ A-Z</span></h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="exFiltro" placeholder="Filtrar por descrição, apelido ou laboratório…" style="max-width:280px;padding:7px 10px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;" oninput="debouncedRender()">
+          <button class="btn secondary small print-btn" onclick="printReportLandscape('printListaExames')" title="Imprime a lista com o nome de todos os exames cadastrados, em folha A4 paisagem">🖨️ Imprimir lista de exames</button>
+        </div>
+      </div>
       <div class="helpbox">
         🏷️ <b>Nomes alternativos (apelidos):</b> cadastre aqui os outros nomes que os laboratórios usam
         para o mesmo exame (ex.: exame de fezes cadastrado como "Parasitológico de Fezes" pode ter os
@@ -1174,8 +1200,33 @@ function viewExames(){
         <thead><tr><th>Status</th><th>Exame</th><th>Nomes alternativos</th><th>Laboratório</th><th>Convênio</th><th>Período</th><th class="right">Cota Princ.</th><th class="right">Usada</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th><th></th></tr></thead>
         <tbody>${renderExamesRows()}</tbody>
       </table></div>
+      <div id="printListaExames" style="display:none;">
+        ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:'Todos os laboratórios', vigencia:'—', competenciaText:'Lista completa de exames cadastrados'})}
+        <h2 style="margin:0 0 10px;">Lista de exames cadastrados</h2>
+        ${renderListaExamesPrintTable()}
+      </div>
     </div>
   `;
+}
+/* Tabela completa (todos os exames cadastrados, sem filtro), usada apenas na impressão
+   da lista de exames — não é exibida na tela normalmente. */
+function renderListaExamesPrintTable(){
+  const list = STATE.exames.slice().sort((a,b)=> a.descricao.localeCompare(b.descricao, 'pt-BR', {sensitivity:'base'}));
+  if(list.length===0) return `<div class="helpbox">Nenhum exame cadastrado ainda.</div>`;
+  return `<div class="table-wrap" style="max-height:none;"><table>
+    <thead><tr><th>Status</th><th>Exame</th><th>Nomes alternativos</th><th>Laboratório</th><th>Convênio</th><th>Período</th><th class="right">Cota Princ.</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th></tr></thead>
+    <tbody>${list.map(e=>`<tr>
+      <td><span class="badge ${e.tipo==='ATIVO'?'ativo':'inativo'}">${e.tipo}</span></td>
+      <td><b>${esc(e.descricao)}</b></td>
+      <td>${(e.apelidos&&e.apelidos.length) ? esc(e.apelidos.join(', ')) : '—'}</td>
+      <td>${esc(e.laboratorio)}</td>
+      <td>${esc(e.convenio)}</td>
+      <td>${esc(e.periodo)||'—'}</td>
+      <td class="right">${fmtNum(e.cotaPrincipal)}</td>
+      <td class="right">${fmtNum(e.cotaReserva)}</td>
+      <td class="right">${fmtMoney(e.valorUnit)}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
 }
 function renderExamesRows(){
   const filtro = (document.getElementById('exFiltro')?.value||'').toLowerCase();
