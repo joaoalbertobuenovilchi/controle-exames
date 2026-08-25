@@ -2535,8 +2535,8 @@ function renderCustomReportTable(rows){
     </table></div>`;
   }
   return `<div class="table-wrap"><table>
-    <thead><tr><th>${groupColLabel()}</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
-    <tbody>${list.map(g=>`<tr><td><b>${esc(g.chave)}</b></td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td><td class="right">${fmtNum(g.qtdCP)}</td><td class="right">${fmtNum(g.qtdCR)}</td><td class="right"><b>${fmtMoney(g.valor)}</b></td></tr>`).join('')}</tbody>
+    <thead><tr><th class="right">Vlr. Unit. (méd.)</th><th>${groupColLabel()}</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
+    <tbody>${list.map(g=>{ const avgUnit = g.qtd>0 ? (g.valor/g.qtd) : 0; return `<tr><td class="right">${fmtMoney(avgUnit)}</td><td><b>${esc(g.chave)}</b></td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td><td class="right">${fmtNum(g.qtdCP)}</td><td class="right">${fmtNum(g.qtdCR)}</td><td class="right"><b>${fmtMoney(g.valor)}</b></td></tr>`; }).join('')}</tbody>
   </table></div>`;
 }
 function exportCustomReportCSV(){
