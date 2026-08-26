@@ -227,10 +227,14 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
     </div>
     <div class="field" style="margin-bottom:6px;">
       <label>Senha</label>
-      <input type="password" id="loginSenha" placeholder="Digite sua senha" autocomplete="current-password" onkeydown="if(event.key==='Enter'){event.preventDefault();submitLogin();}">
+      <div style="position:relative;">
+        <input type="password" id="loginSenha" placeholder="Digite sua senha" autocomplete="current-password" style="width:100%;padding-right:38px;" onkeydown="if(event.key==='Enter'){event.preventDefault();submitLogin();}">
+        <button type="button" onclick="toggleLoginSenhaVisivel()" title="Mostrar/ocultar senha" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;padding:4px 6px;line-height:1;">👁️</button>
+      </div>
     </div>
     <div id="loginErro" style="color:var(--red);font-size:12px;min-height:16px;margin-bottom:8px;"></div>
     <button class="btn" style="width:100%;justify-content:center;" onclick="submitLogin()">Entrar</button>
+    <div style="text-align:center;margin-top:10px;"><a href="#" onclick="esqueciMinhaSenha();return false;" style="font-size:12px;">Esqueci minha senha</a></div>
     <div class="muted" style="font-size:11.5px;margin-top:10px;">Cada usuário tem acesso individual. O administrador do sistema pode cadastrar novos usuários no módulo "Usuários".</div>
   </div>
 </div>
@@ -413,11 +417,13 @@ async function loadUsersState(){
 async function garantirUsuarioMaster(){
   if(!Array.isArray(USERS_STATE.usuarios)) USERS_STATE.usuarios = [];
   if(!Array.isArray(USERS_STATE.logs)) USERS_STATE.logs = [];
+  if(!Array.isArray(USERS_STATE.solicitacoesSenha)) USERS_STATE.solicitacoesSenha = [];
   // Migração suave: usuários já cadastrados antes deste perfil existir ganham um "perfil"
   // com base no campo antigo "master" (true->master, senão comum), sem apagar nada.
   let mudou = false;
   USERS_STATE.usuarios.forEach(u=>{
     if(!u.perfil){ u.perfil = u.master ? 'master' : 'comum'; mudou = true; }
+    if(u.bloqueado===undefined){ u.bloqueado = false; }
   });
   const existeJoao = USERS_STATE.usuarios.some(u=>u.usuario==='joao');
   if(!existeJoao){
@@ -441,17 +447,105 @@ function saveUsersState(imediato){
   clearTimeout(usersSaveTimer);
   if(imediato){ doSave(); } else { usersSaveTimer = setTimeout(doSave, 400); }
 }
+function toggleLoginSenhaVisivel(){
+  const input = document.getElementById('loginSenha');
+  if(!input) return;
+  input.type = (input.type==='password') ? 'text' : 'password';
+}
+/* ---------------- Controle de tentativas de login (bloqueio por segurança) ----------------
+   Guardado no navegador (localStorage) por login digitado. Ao atingir 4 tentativas erradas
+   mostra um aviso; na 5ª tentativa errada, se o login pertencer a um usuário cadastrado, o
+   usuário é bloqueado (campo "bloqueado" salvo no Firestore, junto dos demais usuários) e só
+   o administrador pode desbloqueá-lo no módulo Usuários. Nada disso apaga ou altera nenhum
+   dado dos exames/laboratórios/lançamentos já cadastrados. */
+function lerTentativasLogin(){
+  try{ return JSON.parse(localStorage.getItem('cel_login_tentativas')||'{}'); }catch(e){ return {}; }
+}
+function salvarTentativasLogin(obj){
+  try{ localStorage.setItem('cel_login_tentativas', JSON.stringify(obj)); }catch(e){}
+}
+function registrarTentativaFalha(usuarioInput){
+  const tentativas = lerTentativasLogin();
+  tentativas[usuarioInput] = (tentativas[usuarioInput]||0) + 1;
+  salvarTentativasLogin(tentativas);
+  return tentativas[usuarioInput];
+}
+function limparTentativasLogin(usuarioInput){
+  const tentativas = lerTentativasLogin();
+  delete tentativas[usuarioInput];
+  salvarTentativasLogin(tentativas);
+}
 async function submitLogin(){
   const usuarioInput = (document.getElementById('loginUsuario').value||'').trim().toLowerCase();
   const senhaInput = document.getElementById('loginSenha').value||'';
   const erroEl = document.getElementById('loginErro');
   if(!usuarioInput || !senhaInput){ erroEl.textContent = 'Informe usuário e senha.'; return; }
   const u = USERS_STATE.usuarios.find(x=>x.usuario===usuarioInput);
-  if(!u){ erroEl.textContent = 'Usuário ou senha inválidos.'; return; }
+  if(u && u.bloqueado){
+    erroEl.textContent = 'Este usuário está bloqueado após várias tentativas incorretas. Fale com o administrador do sistema para desbloquear.';
+    return;
+  }
   const hash = await hashSenha(senhaInput);
-  if(hash !== u.senhaHash){ erroEl.textContent = 'Usuário ou senha inválidos.'; return; }
+  const senhaCorreta = u && hash===u.senhaHash;
+  if(!senhaCorreta){
+    const n = registrarTentativaFalha(usuarioInput);
+    if(n >= 5){
+      if(u){ u.bloqueado = true; saveUsersState(true); }
+      erroEl.textContent = 'Usuário bloqueado após 5 tentativas incorretas. Fale com o administrador do sistema para desbloquear.';
+    } else if(n === 4){
+      erroEl.textContent = 'Usuário ou senha inválidos. Atenção: já são 4 tentativas erradas — após a 5ª tentativa este usuário será bloqueado.';
+    } else {
+      erroEl.textContent = 'Usuário ou senha inválidos.';
+    }
+    return;
+  }
+  limparTentativasLogin(usuarioInput);
   erroEl.textContent = '';
   iniciarSessaoUsuario(u);
+}
+/* ---------------- Esqueci minha senha ----------------
+   Como o aplicativo roda inteiramente no navegador (sem servidor de e-mail próprio), o
+   "envio automático" abre um rascunho de e-mail já preenchido no programa de e-mail padrão
+   do usuário, para o(s) administrador(es) cadastrados. O pedido também fica registrado
+   dentro do próprio sistema (módulo Usuários → Solicitações de senha), garantindo que o
+   administrador veja o pedido mesmo que o e-mail não seja enviado por algum motivo. Por
+   segurança, a senha anterior NUNCA é enviada — o sistema guarda só o hash da senha, nunca
+   o texto da senha em si, então nem o próprio sistema consegue recuperá-la; o administrador
+   deve cadastrar uma senha NOVA para o usuário no módulo Usuários. */
+function esqueciMinhaSenha(){
+  const usuarioInput = prompt('Informe o seu usuário (login) para solicitar uma nova senha ao administrador:');
+  if(!usuarioInput) return;
+  const usuario = usuarioInput.trim().toLowerCase();
+  const u = USERS_STATE.usuarios.find(x=>x.usuario===usuario);
+  if(!u){ showToast('Usuário não encontrado.'); return; }
+  const agora = new Date();
+  const pedido = {
+    id: uid(),
+    usuario: u.usuario,
+    nome: u.nome || u.usuario,
+    perfil: perfilLabel(u.perfil || (u.master?'master':'comum')),
+    dataHora: agora.toLocaleString('pt-BR')
+  };
+  if(!Array.isArray(USERS_STATE.solicitacoesSenha)) USERS_STATE.solicitacoesSenha = [];
+  USERS_STATE.solicitacoesSenha.push(pedido);
+  saveUsersState(true);
+  const emailsAdmins = USERS_STATE.usuarios.filter(x=>(x.perfil==='master'||x.master) && x.email).map(x=>x.email);
+  if(emailsAdmins.length===0){
+    showToast('Pedido registrado no sistema, mas nenhum e-mail de administrador está cadastrado ainda (módulo Usuários) para receber o aviso por e-mail.');
+    return;
+  }
+  const assunto = encodeURIComponent('Solicitação de nova senha — Controle de Exames Laboratoriais');
+  const corpo = encodeURIComponent(
+    `Um usuário solicitou uma nova senha de acesso ao Controle de Exames Laboratoriais.\n\n`+
+    `Usuário (login): ${pedido.usuario}\n`+
+    `Nome completo: ${pedido.nome}\n`+
+    `Perfil: ${pedido.perfil}\n`+
+    `Data/hora do pedido: ${pedido.dataHora}\n\n`+
+    `Por segurança, a senha anterior não pode ser recuperada (o sistema guarda apenas um código de verificação da senha, não a senha em si). `+
+    `Cadastre uma senha NOVA para este usuário no módulo Usuários e informe a ele.`
+  );
+  window.location.href = `mailto:${emailsAdmins.join(',')}?subject=${assunto}&body=${corpo}`;
+  showToast('Pedido registrado. Abrindo seu programa de e-mail para enviar ao administrador...');
 }
 function iniciarSessaoUsuario(u){
   currentUser = u;
@@ -2824,13 +2918,15 @@ let editingUsuarioId = null;
 function viewUsuarios(){
   if(!isMaster()) return `<div class="card">Acesso restrito ao administrador do sistema.</div>`;
   const editing = editingUsuarioId ? USERS_STATE.usuarios.find(u=>u.id===editingUsuarioId) : null;
+  const solicitacoes = (USERS_STATE.solicitacoesSenha||[]).slice().reverse();
   return `
     <div class="card">
       <h2>${editing ? '✏️ Editar usuário' : 'Novo usuário'}</h2>
-      <div class="subtitle">${editing ? 'Deixe a senha em branco para manter a senha atual.' : 'Cadastre um novo usuário para acessar o sistema.'}</div>
+      <div class="subtitle">${editing ? 'Deixe a senha em branco para manter a senha atual. A nova senha não pode ser igual à anterior.' : 'Cadastre um novo usuário para acessar o sistema.'}</div>
       <div class="formgrid">
         <div class="field"><label>Usuário (login)</label><input id="usrUsuario" placeholder="Ex: maria" value="${editing?esc(editing.usuario):''}" ${editing?'disabled':''}></div>
         <div class="field"><label>Nome completo</label><input id="usrNome" placeholder="Ex: Maria Silva" value="${editing?esc(editing.nome):''}"></div>
+        <div class="field"><label>E-mail</label><input id="usrEmail" type="email" placeholder="Ex: maria@jaborandi.sp.gov.br" value="${editing?esc(editing.email||''):''}"></div>
         <div class="field"><label>Senha</label><input id="usrSenha" type="password" placeholder="${editing?'(manter atual)':'Digite a senha'}"></div>
         <div class="field"><label>Perfil</label><select id="usrPerfil">
           <option value="comum" ${editing && editing.perfil==='comum'?'selected':''}>Usuário comum (vê e imprime tudo, não insere dados)</option>
@@ -2838,6 +2934,7 @@ function viewUsuarios(){
           <option value="master" ${editing && editing.perfil==='master'?'selected':''}>Administrador (master) — acesso total</option>
         </select></div>
       </div>
+      <div class="helpbox" style="margin-top:6px;">✉️ Cadastre o e-mail dos administradores para receberem os pedidos de "Esqueci minha senha" enviados pela tela de login.</div>
       <div style="margin-top:14px;display:flex;gap:8px;">
         ${editing
           ? `<button class="btn" onclick="saveUsuario()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditUsuario()">Cancelar</button>`
@@ -2847,18 +2944,39 @@ function viewUsuarios(){
     <div class="card">
       <h2>Usuários cadastrados</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>Usuário</th><th>Nome</th><th>Perfil</th><th></th></tr></thead>
+        <thead><tr><th>Usuário</th><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Status</th><th></th></tr></thead>
         <tbody>
-          ${USERS_STATE.usuarios.length===0 ? `<tr class="empty-row"><td colspan="4">Nenhum usuário cadastrado.</td></tr>` :
+          ${USERS_STATE.usuarios.length===0 ? `<tr class="empty-row"><td colspan="6">Nenhum usuário cadastrado.</td></tr>` :
             USERS_STATE.usuarios.map(u=>`
             <tr>
               <td><b>${esc(u.usuario)}</b></td>
               <td>${esc(u.nome)||'—'}</td>
+              <td>${esc(u.email)||'—'}</td>
               <td>${u.perfil==='master'?'<span class="badge ativo">Administrador</span>':u.perfil==='digitador'?'<span class="badge terceirizado">Digitador</span>':'<span class="badge naoinformado">Usuário comum</span>'}</td>
+              <td>${u.bloqueado?'<span class="badge inativo">Bloqueado</span>':'<span class="badge ativo">Ativo</span>'}</td>
               <td>
                 <button class="btn ghost small" onclick="editUsuario('${u.id}')">✏️ editar</button>
+                ${u.bloqueado?`<button class="btn ghost small" onclick="desbloquearUsuario('${u.id}')">🔓 desbloquear</button>`:''}
                 <button class="btn ghost small" onclick="deleteUsuario('${u.id}')">🗑 excluir</button>
               </td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>Solicitações de nova senha ("Esqueci minha senha")</h2>
+      <div class="subtitle">Pedidos enviados pela tela de login. Por segurança, a senha anterior nunca fica visível — cadastre uma senha nova para o usuário acima.</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Usuário</th><th>Nome</th><th>Perfil</th><th>Data/Hora do pedido</th><th></th></tr></thead>
+        <tbody>
+          ${solicitacoes.length===0 ? `<tr class="empty-row"><td colspan="5">Nenhuma solicitação registrada.</td></tr>` :
+            solicitacoes.map(s=>`
+            <tr>
+              <td><b>${esc(s.usuario)}</b></td>
+              <td>${esc(s.nome)}</td>
+              <td>${esc(s.perfil)}</td>
+              <td>${esc(s.dataHora)}</td>
+              <td><button class="btn ghost small" onclick="removerSolicitacaoSenha('${s.id}')">✔ marcar como atendida</button></td>
             </tr>`).join('')}
         </tbody>
       </table></div>
@@ -2869,15 +2987,21 @@ async function saveUsuario(){
   if(!isMaster()) return;
   const usuarioRaw = document.getElementById('usrUsuario').value.trim().toLowerCase();
   const nome = document.getElementById('usrNome').value.trim();
+  const email = document.getElementById('usrEmail').value.trim();
   const senha = document.getElementById('usrSenha').value;
   const perfil = document.getElementById('usrPerfil').value;
   if(editingUsuarioId){
     const u = USERS_STATE.usuarios.find(x=>x.id===editingUsuarioId);
     if(!u){ editingUsuarioId=null; render(); return; }
+    if(senha){
+      const novoHash = await hashSenha(senha);
+      if(novoHash===u.senhaHash){ showToast('A nova senha não pode ser igual à senha anterior.'); return; }
+      u.senhaHash = novoHash;
+    }
     u.nome = nome;
+    u.email = email;
     u.perfil = perfil;
     u.master = (perfil==='master'); // mantido só por compatibilidade com versões antigas
-    if(senha){ u.senhaHash = await hashSenha(senha); }
     editingUsuarioId = null;
     saveUsersState(true); render(); showToast('Usuário atualizado.');
   } else {
@@ -2885,7 +3009,7 @@ async function saveUsuario(){
     if(!senha || senha.length<4){ showToast('Informe uma senha com pelo menos 4 caracteres.'); return; }
     if(USERS_STATE.usuarios.some(u=>u.usuario===usuarioRaw)){ showToast('Já existe um usuário com esse login.'); return; }
     const senhaHash = await hashSenha(senha);
-    USERS_STATE.usuarios.push({ id: uid(), usuario:usuarioRaw, nome, perfil, master:(perfil==='master'), senhaHash, criadoEm:new Date().toISOString() });
+    USERS_STATE.usuarios.push({ id: uid(), usuario:usuarioRaw, nome, email, perfil, master:(perfil==='master'), senhaHash, bloqueado:false, criadoEm:new Date().toISOString() });
     saveUsersState(true); render(); showToast('Usuário adicionado.');
   }
 }
@@ -2904,6 +3028,18 @@ function deleteUsuario(id){
   if(!confirm(`Excluir o usuário "${u.usuario}"? Ele não poderá mais acessar o sistema.`)) return;
   USERS_STATE.usuarios = USERS_STATE.usuarios.filter(x=>x.id!==id);
   if(editingUsuarioId===id) editingUsuarioId = null;
+  saveUsersState(true); render();
+}
+function desbloquearUsuario(id){
+  const u = USERS_STATE.usuarios.find(x=>x.id===id);
+  if(!u) return;
+  u.bloqueado = false;
+  limparTentativasLogin(u.usuario);
+  saveUsersState(true); render(); showToast('Usuário desbloqueado.');
+}
+function removerSolicitacaoSenha(id){
+  if(!Array.isArray(USERS_STATE.solicitacoesSenha)) return;
+  USERS_STATE.solicitacoesSenha = USERS_STATE.solicitacoesSenha.filter(s=>s.id!==id);
   saveUsersState(true); render();
 }
 
