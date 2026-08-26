@@ -159,6 +159,8 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 .section-title{font-size:16px;font-weight:800;margin:26px 0 10px;color:var(--teal-dark);}
 .muted{color:var(--ink-soft);}
 .apelido-mini{color:var(--ink-soft);font-size:10.5px;font-weight:400;margin-top:1px;}
+.read-only-view .edit-only{display:none !important;}
+.read-only-notice{background:#fff8e1;border:1px solid #f0e0a0;border-radius:9px;padding:10px 14px;font-size:12.5px;color:#7a6a1f;margin-bottom:14px;}
 .right{text-align:right;}
 
 /* Cabeçalho padrão dos relatórios */
@@ -275,11 +277,11 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
         <div class="desc" id="pageDesc">Visão geral do controle de exames</div>
       </div>
       <div class="period-pill">📅 Competência atual: <b id="pillCompetencia">—</b>
-        <button class="btn ghost small" onclick="openCompetenciaEditor()">alterar</button>
+        <button class="btn ghost small" id="btnAlterarCompetencia" onclick="openCompetenciaEditor()">alterar</button>
       </div>
       <div class="backup-group">
         <button class="btn secondary small" onclick="exportAllData()" title="Baixa um arquivo com todos os dados cadastrados, para usar em uma nova versão">⭳ Exportar dados</button>
-        <button class="btn secondary small" onclick="document.getElementById('importFileInput').click()" title="Carrega um arquivo de backup exportado anteriormente">⭱ Importar dados</button>
+        <button class="btn secondary small" id="btnImportarDados" onclick="document.getElementById('importFileInput').click()" title="Carrega um arquivo de backup exportado anteriormente">⭱ Importar dados</button>
         <input type="file" id="importFileInput" accept="application/json" style="display:none;" onchange="importAllData(event)">
       </div>
     </div>
@@ -341,9 +343,42 @@ const FIRESTORE_COLLECTION = 'controle_exames_laboratoriais';
    ============================================================ */
 const FIRESTORE_USERS_DOC = '_sistema_usuarios_acessos';
 let USERS_STATE = { usuarios: [], logs: [] };
-let currentUser = null;       // {id, usuario, nome, master, senhaHash}
+let currentUser = null;       // {id, usuario, nome, perfil, master, senhaHash}
 let currentLogEntry = null;   // registro de log da sessão atual (usuário; data; hora início; hora final; comandos)
 let usersLoaded = false;
+
+/* ============================================================
+   PERFIS DE ACESSO
+   - master:     acesso total ao aplicativo (inclusive módulo Administração).
+   - comum:      acessa todos os módulos, menos Administração — mas só pode
+                 VER e IMPRIMIR; não pode inserir, editar ou excluir nada.
+   - digitador:  acessa todos os módulos, menos Administração — pode ver e
+                 imprimir tudo, e só pode INSERIR dados nos módulos
+                 Lançar Exames, Emissão de N.F. e Comparativo entre Laboratórios.
+   ============================================================ */
+const DIGITADOR_VIEWS_PERMITIDAS = ['lancamento','nf','comparativo'];
+function perfilAtual(){ return currentUser ? (currentUser.perfil || (currentUser.master ? 'master':'comum')) : null; }
+function isMaster(){ return perfilAtual()==='master'; }
+function isDigitador(){ return perfilAtual()==='digitador'; }
+function podeEditar(view){
+  if(!currentUser) return false;
+  const p = perfilAtual();
+  if(p==='master') return true;
+  if(p==='digitador') return DIGITADOR_VIEWS_PERMITIDAS.includes(view || currentView);
+  return false; // comum: somente leitura em todo o sistema
+}
+/* Chame no início de toda função que insere/edita/exclui dados. Se não tiver permissão,
+   avisa o usuário e devolve true (para a função de origem encerrar com "return"). */
+function semPermissao(view){
+  if(podeEditar(view)) return false;
+  showToast('Seu perfil de acesso não permite inserir, alterar ou excluir dados aqui — apenas visualizar e imprimir.');
+  return true;
+}
+function perfilLabel(p){
+  if(p==='master') return 'Administrador';
+  if(p==='digitador') return 'Digitador';
+  return 'Usuário comum';
+}
 
 async function hashSenha(senha){
   try{
@@ -378,12 +413,19 @@ async function loadUsersState(){
 async function garantirUsuarioMaster(){
   if(!Array.isArray(USERS_STATE.usuarios)) USERS_STATE.usuarios = [];
   if(!Array.isArray(USERS_STATE.logs)) USERS_STATE.logs = [];
+  // Migração suave: usuários já cadastrados antes deste perfil existir ganham um "perfil"
+  // com base no campo antigo "master" (true->master, senão comum), sem apagar nada.
+  let mudou = false;
+  USERS_STATE.usuarios.forEach(u=>{
+    if(!u.perfil){ u.perfil = u.master ? 'master' : 'comum'; mudou = true; }
+  });
   const existeJoao = USERS_STATE.usuarios.some(u=>u.usuario==='joao');
   if(!existeJoao){
     const senhaHash = await hashSenha('#Rnjc160274');
-    USERS_STATE.usuarios.push({ id: uid(), usuario:'joao', nome:'João', master:true, senhaHash, criadoEm:new Date().toISOString() });
-    saveUsersState(true);
+    USERS_STATE.usuarios.push({ id: uid(), usuario:'joao', nome:'João', master:true, perfil:'master', senhaHash, criadoEm:new Date().toISOString() });
+    mudou = true;
   }
+  if(mudou) saveUsersState(true);
 }
 let usersSaveTimer = null;
 function saveUsersState(imediato){
@@ -723,6 +765,7 @@ function frMatchLanc(){
 }
 
 function frDeleteLabs(){
+  if(semPermissao('labs')) return;
   const matches = frMatchLabs();
   if(matches.length===0){ showToast('Nenhum resultado encontrado.'); return; }
   if(!confirm(`Excluir ${matches.length} laboratório(s) encontrado(s)? Esta ação não pode ser desfeita.`)) return;
@@ -731,6 +774,7 @@ function frDeleteLabs(){
   frState.labs.term=''; saveState(); render(); showToast('Laboratório(s) excluído(s).');
 }
 function frReplaceLabs(){
+  if(semPermissao('labs')) return;
   const matches = frMatchLabs();
   if(matches.length===0){ showToast('Nenhum resultado encontrado.'); return; }
   const {field, term, replace} = frState.labs;
@@ -749,6 +793,7 @@ function frReplaceLabs(){
   saveState(); render(); showToast('Substituição concluída.');
 }
 function frDeleteExames(){
+  if(semPermissao('exames')) return;
   const matches = frMatchExames();
   if(matches.length===0){ showToast('Nenhum resultado encontrado.'); return; }
   if(!confirm(`Excluir ${matches.length} exame(s) do cadastro? Esta ação não pode ser desfeita.`)) return;
@@ -757,6 +802,7 @@ function frDeleteExames(){
   frState.exames.term=''; saveState(); render(); showToast('Exame(s) excluído(s) do cadastro.');
 }
 function frReplaceExames(){
+  if(semPermissao('exames')) return;
   const matches = frMatchExames();
   if(matches.length===0){ showToast('Nenhum resultado encontrado.'); return; }
   const {field, term, replace} = frState.exames;
@@ -771,6 +817,7 @@ function frReplaceExames(){
   saveState(); render(); showToast('Substituição concluída.');
 }
 function frDeleteLanc(){
+  if(semPermissao('lancamento')) return;
   const matches = frMatchLanc();
   if(matches.length===0){ showToast('Nenhum resultado encontrado nesta aba.'); return; }
   if(!confirm(`Excluir ${matches.length} lançamento(s) encontrado(s) na aba ${convenioLabel(lancTab)}? Cada linha inteira será apagada. Esta ação não pode ser desfeita.`)) return;
@@ -779,6 +826,7 @@ function frDeleteLanc(){
   frState.lanc.term=''; saveState(); render(); showToast('Lançamento(s) excluído(s).');
 }
 function frReplaceLanc(){
+  if(semPermissao('lancamento')) return;
   const matches = frMatchLanc();
   if(matches.length===0){ showToast('Nenhum resultado encontrado nesta aba.'); return; }
   const {field, term, replace} = frState.lanc;
@@ -861,7 +909,7 @@ const NAV_ADMIN = [
   ]},
 ];
 function getNav(){
-  return (currentUser && currentUser.master) ? NAV_BASE.concat(NAV_ADMIN) : NAV_BASE;
+  return isMaster() ? NAV_BASE.concat(NAV_ADMIN) : NAV_BASE;
 }
 const PAGE_META = {
   dashboard:['Dashboard','Visão geral atualizada automaticamente com base nos lançamentos e no histórico.'],
@@ -883,10 +931,10 @@ function renderNav(){
     ${g.items.map(it=>`<div class="navitem ${currentView===it.id?'active':''}" onclick="goto('${it.id}')"><span class="ic">${it.icon}</span>${it.label}</div>`).join('')}
   `).join('');
   const userEl = document.getElementById('sidebarUsuarioLogado');
-  if(userEl) userEl.textContent = currentUser ? ('👤 '+(currentUser.nome||currentUser.usuario)+(currentUser.master?' (admin)':'')) : '';
+  if(userEl) userEl.textContent = currentUser ? ('👤 '+(currentUser.nome||currentUser.usuario)+' — '+perfilLabel(perfilAtual())) : '';
 }
 function goto(view){
-  if((view==='usuarios' || view==='logAcesso') && !(currentUser && currentUser.master)) view = 'dashboard';
+  if((view==='usuarios' || view==='logAcesso') && !isMaster()) view = 'dashboard';
   currentView = view;
   document.getElementById('pageTitle').textContent = PAGE_META[view][0];
   document.getElementById('pageDesc').textContent = PAGE_META[view][1];
@@ -910,9 +958,19 @@ function render(){
   else if(currentView==='relatorios') v.innerHTML = viewRelatorios();
   else if(currentView==='usuarios') v.innerHTML = viewUsuarios();
   else if(currentView==='logAcesso') v.innerHTML = viewLogAcesso();
+  const VIEWS_COM_FORM = ['labs','exames','tiposConvenio','lancamento','comparativo','relatorios'];
+  if(!podeEditar(currentView) && VIEWS_COM_FORM.includes(currentView)){
+    v.insertAdjacentHTML('afterbegin', `<div class="read-only-notice">🔒 Seu perfil de acesso (${esc(perfilLabel(perfilAtual()))}) permite apenas visualizar e imprimir este módulo.</div>`);
+  }
   afterRender();
 }
 function afterRender(){
+  const btnAlt = document.getElementById('btnAlterarCompetencia');
+  if(btnAlt) btnAlt.style.display = isMaster() ? '' : 'none';
+  const btnImp = document.getElementById('btnImportarDados');
+  if(btnImp) btnImp.style.display = isMaster() ? '' : 'none';
+  const viewEl = document.getElementById('view');
+  if(viewEl) viewEl.classList.toggle('read-only-view', !podeEditar(currentView));
   if(currentView==='dashboard') drawDashboardCharts();
 }
 
@@ -1054,7 +1112,7 @@ function labNaturezaBadge(natureza){
 function viewLabs(){
   const editing = editingLabId ? STATE.labs.find(l=>l.id===editingLabId) : null;
   return `
-    <div class="card">
+    <div class="card edit-only">
       <h2>${editing ? '✏️ Editar laboratório' : 'Novo laboratório'}</h2>
       <div class="subtitle">${editing ? 'Altere os dados e clique em salvar. Isso não afeta exames ou lançamentos já vinculados a este laboratório.' : 'Preencha os dados e clique em adicionar'}</div>
       <div class="formgrid">
@@ -1077,9 +1135,9 @@ function viewLabs(){
           : `<button class="btn" onclick="saveLab()">+ Adicionar laboratório</button>`}
       </div>
     </div>
-    ${findReplacePanel('labs', [
+    <div class="edit-only">${findReplacePanel('labs', [
       {key:'nome',label:'Nome Fantasia'},{key:'telefone',label:'Telefone'},{key:'celular',label:'Celular'},{key:'email',label:'E-mail'}
-    ], frMatchLabs, 'frDeleteLabs', 'frReplaceLabs')}
+    ], frMatchLabs, 'frDeleteLabs', 'frReplaceLabs')}</div>
     <div class="card">
       <h2 class="sortable-title" onclick="sortLabs()" title="Clique para colocar em ordem alfabética">Laboratórios cadastrados <span class="sort-ic">⇅ A-Z</span></h2>
       <div class="table-wrap"><table>
@@ -1094,7 +1152,7 @@ function viewLabs(){
               <td>${esc(l.telefone)||'—'}</td>
               <td>${esc(l.celular)||'—'}</td>
               <td>${esc(l.email)||'—'}</td>
-              <td>
+              <td class="edit-only">
                 <button class="btn ghost small" onclick="editLab('${l.id}')">✏️ editar</button>
                 <button class="btn ghost small" onclick="deleteLab('${l.id}')">🗑 excluir</button>
               </td>
@@ -1105,6 +1163,7 @@ function viewLabs(){
   `;
 }
 function saveLab(){
+  if(semPermissao('labs')) return;
   const nome = document.getElementById('labNome').value.trim();
   if(!nome){ showToast('Informe o nome fantasia do laboratório.'); return; }
   const dados = {
@@ -1127,6 +1186,7 @@ function saveLab(){
   }
 }
 function editLab(id){
+  if(semPermissao('labs')) return;
   editingLabId = id;
   render();
   const el = document.getElementById('labNome');
@@ -1137,12 +1197,14 @@ function cancelEditLab(){
   render();
 }
 function deleteLab(id){
+  if(semPermissao('labs')) return;
   if(!confirm('Excluir este laboratório? Exames vinculados a ele não serão apagados automaticamente.')) return;
   STATE.labs = STATE.labs.filter(l=>l.id!==id);
   if(editingLabId===id) editingLabId = null;
   saveState(); render();
 }
 function sortLabs(){
+  if(semPermissao('labs')) return;
   // Apenas reordena a lista (A-Z pelo nome fantasia). Nenhum item é apagado ou alterado.
   STATE.labs.sort((a,b)=> a.nome.localeCompare(b.nome, 'pt-BR', {sensitivity:'base'}));
   saveState(); render(); showToast('Laboratórios organizados em ordem alfabética.');
@@ -1155,7 +1217,7 @@ function viewExames(){
   const editing = editingExameId ? STATE.exames.find(e=>e.id===editingExameId) : null;
   const labsOpts = labsForSelect().map(l=>`<option value="${esc(l.nome)}" ${editing && editing.laboratorio===l.nome?'selected':''}>${esc(l.nome)}</option>`).join('');
   return `
-    <div class="card">
+    <div class="card edit-only">
       <h2>${editing ? '✏️ Editar exame' : 'Novo exame'}</h2>
       <div class="subtitle">${editing ? 'Altere os dados e clique em salvar. Lançamentos já registrados com este exame não são afetados pelo novo valor unitário — só os próximos lançamentos usarão o valor atualizado.' : 'Defina a cota principal e a cota reserva — o lançamento consome a cota principal primeiro e depois a reserva, automaticamente.'}</div>
       <div class="formgrid">
@@ -1179,9 +1241,9 @@ function viewExames(){
           : `<button class="btn" onclick="saveExame()">+ Adicionar exame</button>`}
       </div>
     </div>
-    ${findReplacePanel('exames', [
+    <div class="edit-only">${findReplacePanel('exames', [
       {key:'descricao',label:'Descrição'},{key:'laboratorio',label:'Laboratório'},{key:'convenio',label:'Convênio'},{key:'periodo',label:'Período'}
-    ], frMatchExames, 'frDeleteExames', 'frReplaceExames')}
+    ], frMatchExames, 'frDeleteExames', 'frReplaceExames')}</div>
     <div class="card">
       <div class="flexrow">
         <h2 class="sortable-title" style="margin:0;" onclick="sortExames()" title="Clique para colocar em ordem alfabética">Exames cadastrados <span class="sort-ic">⇅ A-Z</span></h2>
@@ -1247,26 +1309,29 @@ function renderExamesRows(){
       <td class="right">${fmtNum(usada)}</td>
       <td class="right">${fmtNum(e.cotaReserva)}</td>
       <td class="right">${fmtMoney(e.valorUnit)}</td>
-      <td><button class="btn ghost small" onclick="editExame('${e.id}')">✏️ editar</button> <button class="btn ghost small" onclick="deleteExame('${e.id}')">🗑</button></td>
+      <td class="edit-only"><button class="btn ghost small" onclick="editExame('${e.id}')">✏️ editar</button> <button class="btn ghost small" onclick="deleteExame('${e.id}')">🗑</button></td>
     </tr>`;
   }).join('');
 }
 /* ---------------- Apelidos (nomes alternativos) de um exame cadastrado ---------------- */
 function renderApelidosCell(e){
   const apelidos = e.apelidos || [];
-  const chips = apelidos.map((a,idx)=>`<span class="chip">${esc(a)}<a href="#" onclick="removeApelido('${e.id}',${idx});return false;" title="Remover apelido">×</a></span>`).join('');
+  const chips = apelidos.map((a,idx)=>`<span class="chip">${esc(a)}<a href="#" class="edit-only" onclick="removeApelido('${e.id}',${idx});return false;" title="Remover apelido">×</a></span>`).join('');
   const aberto = exApelidoAberto===e.id;
   return `<div class="apelidos-cell">
     <div>${chips || '<span class="muted" style="font-size:11.5px;">Nenhum ainda</span>'}</div>
+    <div class="edit-only">
     ${aberto ? `
       <div style="display:flex;gap:4px;margin-top:6px;">
         <input id="apelidoInput_${e.id}" placeholder="Ex: PPF" style="flex:1;padding:5px 8px;font-size:12px;border:1px solid var(--line);border-radius:6px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addApelido('${e.id}');}">
         <button class="btn small" onclick="addApelido('${e.id}')">Add</button>
         <button class="btn ghost small" onclick="exApelidoAberto=null;render();">✕</button>
       </div>` : `<button class="btn ghost small" style="margin-top:4px;padding:2px 6px;" onclick="exApelidoAberto='${e.id}';render();setTimeout(()=>document.getElementById('apelidoInput_${e.id}')?.focus(),0);">+ apelido</button>`}
+    </div>
   </div>`;
 }
 function addApelido(id){
+  if(semPermissao('exames')) return;
   const input = document.getElementById('apelidoInput_'+id);
   if(!input) return;
   const val = input.value.trim();
@@ -1281,12 +1346,14 @@ function addApelido(id){
   setTimeout(()=>document.getElementById('apelidoInput_'+id)?.focus(),0);
 }
 function removeApelido(id, idx){
+  if(semPermissao('exames')) return;
   const ex = STATE.exames.find(e=>e.id===id);
   if(!ex || !Array.isArray(ex.apelidos)) return;
   ex.apelidos.splice(idx,1);
   saveState(); render();
 }
 function saveExame(){
+  if(semPermissao('exames')) return;
   const descricao = document.getElementById('exDescricao').value.trim();
   const laboratorio = document.getElementById('exLab').value;
   if(!descricao){ showToast('Informe a descrição do exame.'); return; }
@@ -1316,6 +1383,7 @@ function saveExame(){
   }
 }
 function editExame(id){
+  if(semPermissao('exames')) return;
   editingExameId = id;
   render();
   const el = document.getElementById('exDescricao');
@@ -1326,12 +1394,14 @@ function cancelEditExame(){
   render();
 }
 function deleteExame(id){
+  if(semPermissao('exames')) return;
   if(!confirm('Excluir este exame do cadastro?')) return;
   STATE.exames = STATE.exames.filter(e=>e.id!==id);
   if(editingExameId===id) editingExameId = null;
   saveState(); render();
 }
 function sortExames(){
+  if(semPermissao('exames')) return;
   // Apenas reordena a lista (A-Z pela descrição). Nenhum item é apagado ou alterado.
   STATE.exames.sort((a,b)=> a.descricao.localeCompare(b.descricao, 'pt-BR', {sensitivity:'base'}));
   saveState(); render(); showToast('Exames organizados em ordem alfabética.');
@@ -1379,7 +1449,7 @@ function viewTiposConvenio(){
       existente não afeta os dados já cadastrados/inseridos</b> — apenas o nome exibido é atualizado
       em todos os campos do sistema. Ex.: "Compra Direta" → "Compra Direta - 2026/2027".
     </div>
-    <div class="card">
+    <div class="card edit-only">
       <h2>Novo tipo de convênio/processo</h2>
       <div class="subtitle">Informe o nome como deverá aparecer em todo o sistema.</div>
       <div class="formgrid" style="grid-template-columns:3fr 1fr;">
@@ -1395,7 +1465,7 @@ function viewTiposConvenio(){
           ${STATE.tiposConvenio.length===0 ? `<tr class="empty-row"><td colspan="2">Nenhum tipo cadastrado.</td></tr>` :
             STATE.tiposConvenio.map(t=>`<tr>
               <td><span class="badge ${t.badge}">${esc(t.label)}</span></td>
-              <td>
+              <td class="edit-only">
                 <button class="btn ghost small" onclick="renameTipoConvenio('${t.key}')">✏️ Alterar nome</button>
                 <button class="btn ghost small" onclick="deleteTipoConvenio('${t.key}')">🗑 excluir</button>
               </td>
@@ -1406,6 +1476,7 @@ function viewTiposConvenio(){
   `;
 }
 function addTipoConvenio(){
+  if(semPermissao('tiposConvenio')) return;
   const label = document.getElementById('tcNovoLabel').value.trim();
   if(!label){ showToast('Informe o nome do novo tipo de convênio/processo.'); return; }
   const key = slugKeyFromLabel(label);
@@ -1415,6 +1486,7 @@ function addTipoConvenio(){
   saveState(); render(); showToast('Tipo de convênio/processo cadastrado.');
 }
 function renameTipoConvenio(key){
+  if(semPermissao('tiposConvenio')) return;
   const t = STATE.tiposConvenio.find(x=>x.key===key);
   if(!t) return;
   const novoNome = prompt('Novo nome para exibição deste tipo de convênio/processo:', t.label);
@@ -1426,6 +1498,7 @@ function renameTipoConvenio(key){
   showToast('Nome atualizado em todo o sistema. Os dados já cadastrados não foram alterados.');
 }
 function deleteTipoConvenio(key){
+  if(semPermissao('tiposConvenio')) return;
   const t = STATE.tiposConvenio.find(x=>x.key===key);
   if(!t) return;
   if(STATE.tiposConvenio.length<=1){ showToast('Deve existir ao menos um tipo de convênio/processo cadastrado.'); return; }
@@ -1458,7 +1531,7 @@ function viewLancamento(){
       ${STATE.tiposConvenio.map(c=>`<div class="tab ${lancTab===c.key?'active':''}" onclick="setLancTab('${c.key}')">${esc(c.label)}</div>`).join('')}
     </div>
     <div class="helpbox">A cota <b>principal</b> é usada primeiro; quando ela esgota, os próximos lançamentos do mesmo exame passam a consumir a <b>cota reserva</b> automaticamente. Isso substitui o preenchimento manual de "Vlr. C.P." / "Vlr. C.R." da planilha.</div>
-    <div class="card">
+    <div class="card edit-only">
       <h2>Novo lançamento — ${convenioLabel(lancTab)}</h2>
       <div class="subtitle">Competência: <b>${STATE.competencia.mes}/${STATE.competencia.ano}</b></div>
       <div class="formgrid">
@@ -1473,7 +1546,7 @@ function viewLancamento(){
       <div style="margin-top:14px;"><button class="btn" onclick="addLancamento()">+ Lançar exame</button></div>
     </div>
 
-    <div class="card">
+    <div class="card edit-only">
       <div class="flexrow">
         <div>
           <h2 style="margin:0;">Importar exames — ${convenioLabel(lancTab)}</h2>
@@ -1490,14 +1563,14 @@ function viewLancamento(){
       ${ultimoLoteVisivelHtml()}
     </div>
 
-    ${findReplacePanel('lanc', [
+    <div class="edit-only">${findReplacePanel('lanc', [
       {key:'exame',label:'Exame'},{key:'paciente',label:'Paciente'},{key:'laboratorio',label:'Laboratório'},{key:'unidade',label:'Unidade'}
-    ], frMatchLanc, 'frDeleteLanc', 'frReplaceLanc')}
+    ], frMatchLanc, 'frDeleteLanc', 'frReplaceLanc')}</div>
 
     <div class="card">
       <div class="flexrow"><h2 style="margin:0;">Lançamentos — ${convenioLabel(lancTab)}</h2>
         <div>
-          <button class="btn ghost small" onclick="limparImportadosDaAba()" title="Exclui de uma só vez todos os lançamentos desta aba que vieram de importação de arquivo (lançamentos digitados manualmente não são afetados)">🗑 Excluir importados desta aba</button>
+          <button class="btn ghost small edit-only" onclick="limparImportadosDaAba()" title="Exclui de uma só vez todos os lançamentos desta aba que vieram de importação de arquivo (lançamentos digitados manualmente não são afetados)">🗑 Excluir importados desta aba</button>
           <button class="btn secondary small" onclick="exportCSV('${lancTab}')">⭳ Exportar CSV</button>
         </div>
       </div>
@@ -1517,7 +1590,7 @@ function viewLancamento(){
               <td class="right">${fmtNum(l.qtdCP)}</td>
               <td class="right">${fmtNum(l.qtdCR)}</td>
               <td class="right"><b>${fmtMoney(l.valorTotal)}</b></td>
-              <td><button class="btn ghost small" onclick="deleteLancamento('${l.id}')">🗑</button></td>
+              <td class="edit-only"><button class="btn ghost small" onclick="deleteLancamento('${l.id}')">🗑</button></td>
             </tr>`).join('')}
         </tbody>
         ${lancsTab.length>0 ? `<tfoot><tr><td colspan="7">TOTAL GERAL</td><td class="right">${fmtNum(totQtd)}</td><td class="right">${fmtNum(totCP)}</td><td class="right">${fmtNum(totCR)}</td><td class="right">${fmtMoney(totValor)}</td><td></td></tr></tfoot>`:''}
@@ -1552,6 +1625,7 @@ function ultimoLoteVisivelHtml(){
     </div>`;
 }
 function desfazerUltimaImportacao(){
+  if(semPermissao('lancamento')) return;
   const info = ultimoLoteImportado[lancTab];
   if(!info) return;
   const alvo = STATE.lancamentos.filter(l=>l.loteImportacaoId===info.loteId);
@@ -1563,6 +1637,7 @@ function desfazerUltimaImportacao(){
   showToast('Última importação desfeita com sucesso.');
 }
 function limparImportadosDaAba(){
+  if(semPermissao('lancamento')) return;
   const alvo = STATE.lancamentos.filter(l=>l.convenio===lancTab && l.importado);
   if(alvo.length===0){ showToast('Não há lançamentos importados nesta aba (competência atual).'); return; }
   if(!confirm(`Excluir TODOS os ${alvo.length} lançamento(s) importado(s) de arquivo na aba ${convenioLabel(lancTab)} (competência atual)? Lançamentos digitados manualmente NÃO serão afetados. Esta ação não pode ser desfeita.`)) return;
@@ -1572,6 +1647,7 @@ function limparImportadosDaAba(){
   showToast('Lançamentos importados desta aba foram excluídos.');
 }
 function addLancamento(){
+  if(semPermissao('lancamento')) return;
   const paciente = document.getElementById('lcPaciente').value.trim();
   const laboratorio = document.getElementById('lcLab').value;
   const exameId = document.getElementById('lcExame').value;
@@ -1612,6 +1688,7 @@ function addLancamento(){
   saveState(); render(); showToast('Exame lançado com sucesso.');
 }
 function deleteLancamento(id){
+  if(semPermissao('lancamento')) return;
   STATE.lancamentos = STATE.lancamentos.filter(l=>l.id!==id);
   saveState(); render();
 }
@@ -1775,6 +1852,7 @@ function parseTXTFile(file){
   });
 }
 async function handleImportFile(e){
+  if(semPermissao('lancamento')){ e.target.value=''; return; }
   const file = e.target.files[0];
   if(!file) return;
   const ext = file.name.split('.').pop().toLowerCase();
@@ -2040,7 +2118,7 @@ function viewRelatorios(){
   const totValor = rows.reduce((s,r)=>s+r.valorTotal,0);
   const atualTem = STATE.lancamentos.length>0;
   return `
-    <div class="card">
+    <div class="card edit-only">
       <div class="flexrow">
         <div>
           <h2 style="margin:0;">Fechar competência atual</h2>
@@ -2111,6 +2189,7 @@ function viewRelatorios(){
   `;
 }
 function fecharCompetencia(){
+  if(!isMaster()){ showToast('Apenas o administrador pode fechar a competência.'); return; }
   if(STATE.lancamentos.length===0){ showToast('Não há lançamentos para fechar.'); return; }
   if(!confirm(`Fechar a competência ${STATE.competencia.mes}/${STATE.competencia.ano}? Os lançamentos atuais serão movidos para o histórico e a lista de lançamentos ficará vazia para a próxima competência.`)) return;
 
@@ -2176,6 +2255,7 @@ function extractComparativoRows(rows){
   })).filter(r=>r.paciente || r.exame);
 }
 async function handleComparativoImport(event, lado){
+  if(semPermissao('comparativo')){ event.target.value=''; return; }
   const file = event.target.files[0];
   if(!file) return;
   const data = comparativoDataFor(comparativoTab);
@@ -2204,6 +2284,7 @@ async function handleComparativoImport(event, lado){
   event.target.value = '';
 }
 function resetComparativoLado(lado){
+  if(semPermissao('comparativo')) return;
   const data = comparativoDataFor(comparativoTab);
   if(lado==='principal'){ data.principalLab=''; data.principalArquivo=''; data.principalRows=null; }
   else { data.tercLab=''; data.tercArquivo=''; data.tercRows=null; }
@@ -2214,6 +2295,7 @@ function resetComparativoLado(lado){
    nem em nenhum outro cadastro — por isso limpar aqui não afeta dado algum já registrado
    no sistema, apenas esvazia a conferência em andamento para permitir reimportar do zero. */
 function limparComparativoTab(){
+  if(semPermissao('comparativo')) return;
   const data = comparativoDataFor(comparativoTab);
   if(!data.principalRows && !data.tercRows) return;
   if(!confirm(`Limpar os arquivos importados do Comparativo na aba ${convenioLabel(comparativoTab)}? Isso não apaga nenhum lançamento nem exame cadastrado — apenas os arquivos importados para esta conferência.`)) return;
@@ -2266,7 +2348,7 @@ function viewComparativo(){
           quantidade diferente) no arquivo do laboratório principal. Esta conferência não é salva em Lançamentos —
           reimportar um arquivo sempre SUBSTITUI o anterior daquele lado, nunca duplica.
         </div>
-        ${(data.principalRows || data.tercRows) ? `<button class="btn ghost small" style="white-space:nowrap;" onclick="limparComparativoTab()">🗑 Limpar comparação desta aba</button>` : ''}
+        ${(data.principalRows || data.tercRows) ? `<button class="btn ghost small edit-only" style="white-space:nowrap;" onclick="limparComparativoTab()">🗑 Limpar comparação desta aba</button>` : ''}
       </div>
     </div>
 
@@ -2275,24 +2357,24 @@ function viewComparativo(){
         <h2>1) Laboratório Principal (Público)</h2>
         <div class="subtitle">${esc(convenioLabel(comparativoTab))}</div>
         ${labsPrincipal.length===0 ? `<div class="helpbox">Nenhum laboratório cadastrado como "Principal (Público)". Cadastre em <b>Laboratórios</b>.</div>` : `
-        <div class="field" style="margin-bottom:10px;"><label>Laboratório</label><select id="cmpLabPrincipal">
+        <div class="field edit-only" style="margin-bottom:10px;"><label>Laboratório</label><select id="cmpLabPrincipal">
           <option value="">Selecione…</option>${optsPrincipal}
         </select></div>
         <input type="file" id="cmpFilePrincipal" accept=".xlsx,.xls,.csv,.docx,.txt" style="display:none" onchange="handleComparativoImport(event,'principal')">
-        <button class="btn" onclick="document.getElementById('cmpFilePrincipal').click()">📥 Importar arquivo</button>
-        ${data.principalRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.principalArquivo)}</b> — ${fmtNum(data.principalRows.length)} registro(s) — Laboratório: <b>${esc(data.principalLab)}</b> &nbsp;<button class="btn ghost small" style="padding:2px 6px;" onclick="resetComparativoLado('principal')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
+        <button class="btn edit-only" onclick="document.getElementById('cmpFilePrincipal').click()">📥 Importar arquivo</button>
+        ${data.principalRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.principalArquivo)}</b> — ${fmtNum(data.principalRows.length)} registro(s) — Laboratório: <b>${esc(data.principalLab)}</b> &nbsp;<button class="btn ghost small edit-only" style="padding:2px 6px;" onclick="resetComparativoLado('principal')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
         `}
       </div>
       <div class="card">
         <h2>2) Laboratório Terceirizado</h2>
         <div class="subtitle">${esc(convenioLabel(comparativoTab))}</div>
         ${labsTerc.length===0 ? `<div class="helpbox">Nenhum laboratório cadastrado como "Terceirizado". Cadastre em <b>Laboratórios</b>.</div>` : `
-        <div class="field" style="margin-bottom:10px;"><label>Laboratório</label><select id="cmpLabTerc">
+        <div class="field edit-only" style="margin-bottom:10px;"><label>Laboratório</label><select id="cmpLabTerc">
           <option value="">Selecione…</option>${optsTerc}
         </select></div>
         <input type="file" id="cmpFileTerc" accept=".xlsx,.xls,.csv,.docx,.txt" style="display:none" onchange="handleComparativoImport(event,'terceirizado')">
-        <button class="btn" onclick="document.getElementById('cmpFileTerc').click()">📥 Importar arquivo</button>
-        ${data.tercRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.tercArquivo)}</b> — ${fmtNum(data.tercRows.length)} registro(s) — Laboratório: <b>${esc(data.tercLab)}</b> &nbsp;<button class="btn ghost small" style="padding:2px 6px;" onclick="resetComparativoLado('terceirizado')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
+        <button class="btn edit-only" onclick="document.getElementById('cmpFileTerc').click()">📥 Importar arquivo</button>
+        ${data.tercRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.tercArquivo)}</b> — ${fmtNum(data.tercRows.length)} registro(s) — Laboratório: <b>${esc(data.tercLab)}</b> &nbsp;<button class="btn ghost small edit-only" style="padding:2px 6px;" onclick="resetComparativoLado('terceirizado')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
         `}
       </div>
     </div>
@@ -2669,6 +2751,7 @@ async function exportPorExameXLSX(){
 
 /* ---------------- Competência editor ---------------- */
 function openCompetenciaEditor(){
+  if(!isMaster()){ showToast('Apenas o administrador pode alterar a competência atual.'); return; }
   const mes = prompt('Mês da competência atual:', STATE.competencia.mes);
   if(!mes) return;
   const mesUpper = mes.toUpperCase().trim();
@@ -2697,6 +2780,7 @@ function exportAllData(){
   showToast('Backup exportado! Guarde este arquivo para importar em uma próxima versão.');
 }
 function importAllData(event){
+  if(!isMaster()){ showToast('Apenas o administrador pode restaurar um backup completo.'); event.target.value=''; return; }
   const file = event.target.files[0];
   if(!file) return;
   const reader = new FileReader();
@@ -2738,7 +2822,7 @@ function importAllData(event){
    ============================================================ */
 let editingUsuarioId = null;
 function viewUsuarios(){
-  if(!(currentUser && currentUser.master)) return `<div class="card">Acesso restrito ao administrador do sistema.</div>`;
+  if(!isMaster()) return `<div class="card">Acesso restrito ao administrador do sistema.</div>`;
   const editing = editingUsuarioId ? USERS_STATE.usuarios.find(u=>u.id===editingUsuarioId) : null;
   return `
     <div class="card">
@@ -2748,9 +2832,10 @@ function viewUsuarios(){
         <div class="field"><label>Usuário (login)</label><input id="usrUsuario" placeholder="Ex: maria" value="${editing?esc(editing.usuario):''}" ${editing?'disabled':''}></div>
         <div class="field"><label>Nome completo</label><input id="usrNome" placeholder="Ex: Maria Silva" value="${editing?esc(editing.nome):''}"></div>
         <div class="field"><label>Senha</label><input id="usrSenha" type="password" placeholder="${editing?'(manter atual)':'Digite a senha'}"></div>
-        <div class="field"><label>Perfil</label><select id="usrMaster">
-          <option value="0" ${editing && !editing.master?'selected':''}>Usuário comum</option>
-          <option value="1" ${editing && editing.master?'selected':''}>Administrador (master)</option>
+        <div class="field"><label>Perfil</label><select id="usrPerfil">
+          <option value="comum" ${editing && editing.perfil==='comum'?'selected':''}>Usuário comum (vê e imprime tudo, não insere dados)</option>
+          <option value="digitador" ${editing && editing.perfil==='digitador'?'selected':''}>Usuário (digitador) — insere dados em Lançar Exames, N.F. e Comparativo</option>
+          <option value="master" ${editing && editing.perfil==='master'?'selected':''}>Administrador (master) — acesso total</option>
         </select></div>
       </div>
       <div style="margin-top:14px;display:flex;gap:8px;">
@@ -2769,7 +2854,7 @@ function viewUsuarios(){
             <tr>
               <td><b>${esc(u.usuario)}</b></td>
               <td>${esc(u.nome)||'—'}</td>
-              <td>${u.master?'<span class="badge ativo">Administrador</span>':'<span class="badge naoinformado">Usuário comum</span>'}</td>
+              <td>${u.perfil==='master'?'<span class="badge ativo">Administrador</span>':u.perfil==='digitador'?'<span class="badge terceirizado">Digitador</span>':'<span class="badge naoinformado">Usuário comum</span>'}</td>
               <td>
                 <button class="btn ghost small" onclick="editUsuario('${u.id}')">✏️ editar</button>
                 <button class="btn ghost small" onclick="deleteUsuario('${u.id}')">🗑 excluir</button>
@@ -2781,16 +2866,17 @@ function viewUsuarios(){
   `;
 }
 async function saveUsuario(){
-  if(!(currentUser && currentUser.master)) return;
+  if(!isMaster()) return;
   const usuarioRaw = document.getElementById('usrUsuario').value.trim().toLowerCase();
   const nome = document.getElementById('usrNome').value.trim();
   const senha = document.getElementById('usrSenha').value;
-  const master = document.getElementById('usrMaster').value === '1';
+  const perfil = document.getElementById('usrPerfil').value;
   if(editingUsuarioId){
     const u = USERS_STATE.usuarios.find(x=>x.id===editingUsuarioId);
     if(!u){ editingUsuarioId=null; render(); return; }
     u.nome = nome;
-    u.master = master;
+    u.perfil = perfil;
+    u.master = (perfil==='master'); // mantido só por compatibilidade com versões antigas
     if(senha){ u.senhaHash = await hashSenha(senha); }
     editingUsuarioId = null;
     saveUsersState(true); render(); showToast('Usuário atualizado.');
@@ -2799,7 +2885,7 @@ async function saveUsuario(){
     if(!senha || senha.length<4){ showToast('Informe uma senha com pelo menos 4 caracteres.'); return; }
     if(USERS_STATE.usuarios.some(u=>u.usuario===usuarioRaw)){ showToast('Já existe um usuário com esse login.'); return; }
     const senhaHash = await hashSenha(senha);
-    USERS_STATE.usuarios.push({ id: uid(), usuario:usuarioRaw, nome, master, senhaHash, criadoEm:new Date().toISOString() });
+    USERS_STATE.usuarios.push({ id: uid(), usuario:usuarioRaw, nome, perfil, master:(perfil==='master'), senhaHash, criadoEm:new Date().toISOString() });
     saveUsersState(true); render(); showToast('Usuário adicionado.');
   }
 }
@@ -2825,7 +2911,7 @@ function deleteUsuario(id){
    LOG DE ACESSO (módulo do administrador/master)
    ============================================================ */
 function viewLogAcesso(){
-  if(!(currentUser && currentUser.master)) return `<div class="card">Acesso restrito ao administrador do sistema.</div>`;
+  if(!isMaster()) return `<div class="card">Acesso restrito ao administrador do sistema.</div>`;
   const logs = USERS_STATE.logs.slice().reverse();
   return `
     <div class="card">
