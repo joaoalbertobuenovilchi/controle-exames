@@ -631,9 +631,9 @@ const BADGE_CLASSES = ['tipo-cd','tipo-disp','tipo-pregao','tipo-4','tipo-5','ti
    Apenas o campo "label" (nome exibido) pode ser alterado pelo usuário, no módulo
    "Tipos de Convênio/Processo", sem afetar nenhum dado já cadastrado. */
 const DEFAULT_TIPOS_CONVENIO = [
-  {key:"COMPRADIRETA", label:"Compra Direta", cadastroValue:"COMPRA DIRETA", badge:"tipo-cd"},
-  {key:"DISPENSA", label:"Dispensa", cadastroValue:"DISPENSA DE LICITAÇÃO", badge:"tipo-disp"},
-  {key:"PREGAO", label:"Pregão", cadastroValue:"PREGÃO ELETRÔNICO", badge:"tipo-pregao"},
+  {key:"COMPRADIRETA", label:"Compra Direta", cadastroValue:"COMPRA DIRETA", badge:"tipo-cd", usaCotaReserva:false, pctPrincipal:100, pctReserva:0},
+  {key:"DISPENSA", label:"Dispensa", cadastroValue:"DISPENSA DE LICITAÇÃO", badge:"tipo-disp", usaCotaReserva:false, pctPrincipal:100, pctReserva:0},
+  {key:"PREGAO", label:"Pregão", cadastroValue:"PREGÃO ELETRÔNICO", badge:"tipo-pregao", usaCotaReserva:false, pctPrincipal:100, pctReserva:0},
 ];
 
 let STATE = {
@@ -680,9 +680,44 @@ function garantirTiposConvenio(){
   if(!Array.isArray(STATE.tiposConvenio) || STATE.tiposConvenio.length===0){
     STATE.tiposConvenio = DEFAULT_TIPOS_CONVENIO.map(t=>({...t}));
   }
+  // Migração suave: tipos já cadastrados antes deste recurso existir ganham a configuração
+  // de cota (por padrão "somente cota principal", ou seja, comportamento igual ao de antes)
+  // sem alterar nenhum exame já cadastrado.
+  STATE.tiposConvenio.forEach(t=>{
+    if(t.usaCotaReserva===undefined) t.usaCotaReserva = false;
+    if(t.pctPrincipal===undefined) t.pctPrincipal = t.usaCotaReserva ? 50 : 100;
+    if(t.pctReserva===undefined) t.pctReserva = t.usaCotaReserva ? 50 : 0;
+  });
   if(!STATE.tiposConvenio.find(t=>t.key===lancTab)) lancTab = STATE.tiposConvenio[0].key;
   if(!STATE.tiposConvenio.find(t=>t.key===nfTab)) nfTab = STATE.tiposConvenio[0].key;
   garantirApelidosExames();
+  garantirQtdTotalExames();
+}
+/* Calcula a divisão entre cota principal e cota reserva de um exame, a partir da
+   quantidade total e da configuração de percentuais do tipo de convênio/processo dele.
+   Os valores são sempre números inteiros (sem casas decimais); se houver arredondamento,
+   a diferença fica com a COTA PRINCIPAL, para a soma bater exatamente com a quantidade total. */
+function calcularCotas(qtdTotal, convenioCadastroValue){
+  qtdTotal = Math.max(0, Math.round(Number(qtdTotal)||0));
+  const t = tipoConvenioByCadastroValue(convenioCadastroValue);
+  if(!t || !t.usaCotaReserva){
+    return { cotaPrincipal: qtdTotal, cotaReserva: 0 };
+  }
+  const pctReserva = Number(t.pctReserva)||0;
+  const cotaReserva = Math.floor(qtdTotal * pctReserva / 100);
+  const cotaPrincipal = qtdTotal - cotaReserva;
+  return { cotaPrincipal, cotaReserva };
+}
+/* Garante que todo exame cadastrado (inclusive os já existentes, criados antes deste campo
+   existir) tenha uma "Quantidade Total" definida. Para exames antigos, calcula a partir da
+   soma das cotas já cadastradas (cotaPrincipal + cotaReserva) — ou seja, NÃO altera nenhum
+   valor já existente, apenas preenche o novo campo com o total que já estava implícito. */
+function garantirQtdTotalExames(){
+  (STATE.exames||[]).forEach(e=>{
+    if(e.qtdTotal===undefined || e.qtdTotal===null){
+      e.qtdTotal = (Number(e.cotaPrincipal)||0) + (Number(e.cotaReserva)||0);
+    }
+  });
 }
 /* Garante que todo exame cadastrado (inclusive os já existentes, criados antes deste
    recurso existir) tenha a lista "apelidos" (nomes alternativos/sinônimos usados por
@@ -1066,6 +1101,20 @@ function afterRender(){
   const viewEl = document.getElementById('view');
   if(viewEl) viewEl.classList.toggle('read-only-view', !podeEditar(currentView));
   if(currentView==='dashboard') drawDashboardCharts();
+  if(currentView==='exames') atualizarCotasCalculadasExame();
+}
+/* Recalcula (só na tela, sem salvar nada) a cota principal/reserva exibidas no formulário
+   de Exames, a partir da quantidade total digitada e do tipo de convênio/processo
+   selecionado. É chamada a cada alteração desses dois campos, e a cada abertura da tela. */
+function atualizarCotasCalculadasExame(){
+  const qtdEl = document.getElementById('exQtdTotal');
+  const convEl = document.getElementById('exConvenio');
+  const cpEl = document.getElementById('exCotaP');
+  const crEl = document.getElementById('exCotaR');
+  if(!qtdEl || !convEl || !cpEl || !crEl) return;
+  const { cotaPrincipal, cotaReserva } = calcularCotas(qtdEl.value, convEl.value);
+  cpEl.value = cotaPrincipal;
+  crEl.value = cotaReserva;
 }
 
 /* ============================================================
@@ -1310,25 +1359,30 @@ function sortLabs(){
 function viewExames(){
   const editing = editingExameId ? STATE.exames.find(e=>e.id===editingExameId) : null;
   const labsOpts = labsForSelect().map(l=>`<option value="${esc(l.nome)}" ${editing && editing.laboratorio===l.nome?'selected':''}>${esc(l.nome)}</option>`).join('');
+  const qtdTotalIni = editing ? (editing.qtdTotal ?? (editing.cotaPrincipal+editing.cotaReserva)) : 0;
+  const convenioIni = editing ? editing.convenio : (STATE.tiposConvenio[0]?.cadastroValue||'');
+  const cotasIni = calcularCotas(qtdTotalIni, convenioIni);
   return `
     <div class="card edit-only">
       <h2>${editing ? '✏️ Editar exame' : 'Novo exame'}</h2>
-      <div class="subtitle">${editing ? 'Altere os dados e clique em salvar. Lançamentos já registrados com este exame não são afetados pelo novo valor unitário — só os próximos lançamentos usarão o valor atualizado.' : 'Defina a cota principal e a cota reserva — o lançamento consome a cota principal primeiro e depois a reserva, automaticamente.'}</div>
+      <div class="subtitle">${editing ? 'Altere os dados e clique em salvar. Lançamentos já registrados com este exame não são afetados pelo novo valor unitário — só os próximos lançamentos usarão o valor atualizado.' : 'Informe a quantidade total e o tipo de convênio/processo — a cota principal e a cota reserva são calculadas automaticamente, conforme configurado em "Tipos de Convênio/Processo".'}</div>
       <div class="formgrid">
         <div class="field"><label>Status</label><select id="exTipo">
           <option value="ATIVO" ${editing && editing.tipo==='ATIVO'?'selected':''}>Ativo</option>
           <option value="INATIVO" ${editing && editing.tipo==='INATIVO'?'selected':''}>Inativo</option>
         </select></div>
+        <div class="field"><label>Quantidade total de exames</label><input id="exQtdTotal" type="number" min="0" value="${qtdTotalIni}" oninput="atualizarCotasCalculadasExame()"></div>
         <div class="field" style="grid-column:span 2;"><label>Descrição do exame</label><input id="exDescricao" placeholder="Ex: Ácido Fólico" value="${editing?esc(editing.descricao):''}"></div>
         <div class="field"><label>Laboratório</label><select id="exLab">${labsOpts || '<option value="">Cadastre um laboratório primeiro</option>'}</select></div>
-        <div class="field"><label>Tipo de convênio/processo</label><select id="exConvenio">
+        <div class="field"><label>Tipo de convênio/processo</label><select id="exConvenio" onchange="atualizarCotasCalculadasExame()">
           ${STATE.tiposConvenio.map(t=>`<option value="${esc(t.cadastroValue)}" ${editing && editing.convenio===t.cadastroValue?'selected':''}>${esc(t.label)}</option>`).join('')}
         </select></div>
         <div class="field"><label>Período (vigência)</label><input id="exPeriodo" placeholder="Ex: 2026/2027" value="${editing?esc(editing.periodo):''}"></div>
-        <div class="field"><label>Qtd. cota principal</label><input id="exCotaP" type="number" min="0" value="${editing?editing.cotaPrincipal:0}"></div>
-        <div class="field"><label>Qtd. cota reserva</label><input id="exCotaR" type="number" min="0" value="${editing?editing.cotaReserva:0}"></div>
+        <div class="field"><label>Qtd. cota principal <span class="muted" style="font-weight:400;">(calculada)</span></label><input id="exCotaP" type="number" value="${cotasIni.cotaPrincipal}" disabled style="background:#f0f2f2;"></div>
+        <div class="field"><label>Qtd. cota reserva <span class="muted" style="font-weight:400;">(calculada)</span></label><input id="exCotaR" type="number" value="${cotasIni.cotaReserva}" disabled style="background:#f0f2f2;"></div>
         <div class="field"><label>Valor unitário (R$)</label><input id="exValor" type="number" min="0" step="0.01" value="${editing?editing.valorUnit:0}"></div>
       </div>
+      <div class="muted" style="font-size:11.5px;margin-top:8px;">A cota principal e a cota reserva são recalculadas automaticamente a partir da quantidade total e do percentual configurado para o tipo de convênio/processo selecionado (módulo "Tipos de Convênio/Processo"). Se houver arredondamento, o valor maior fica com a cota principal.</div>
       <div style="margin-top:14px;display:flex;gap:8px;">
         ${editing
           ? `<button class="btn" onclick="saveExame()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditExame()">Cancelar</button>`
@@ -1354,7 +1408,7 @@ function viewExames(){
         desses nomes. Adicionar ou remover apelidos não altera nem apaga nenhum dado já lançado.
       </div>
       <div class="table-wrap" style="margin-top:10px;"><table>
-        <thead><tr><th>Status</th><th>Exame</th><th>Nomes alternativos</th><th>Laboratório</th><th>Convênio</th><th>Período</th><th class="right">Cota Princ.</th><th class="right">Usada</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th><th></th></tr></thead>
+        <thead><tr><th>Status</th><th class="right">Qtd Total</th><th>Exame</th><th>Nomes alternativos</th><th>Laboratório</th><th>Convênio</th><th>Período</th><th class="right">Cota Princ.</th><th class="right">Usada</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th><th></th></tr></thead>
         <tbody>${renderExamesRows()}</tbody>
       </table></div>
       <div id="printListaExames" style="display:none;">
@@ -1371,9 +1425,10 @@ function renderListaExamesPrintTable(){
   const list = STATE.exames.slice().sort((a,b)=> a.descricao.localeCompare(b.descricao, 'pt-BR', {sensitivity:'base'}));
   if(list.length===0) return `<div class="helpbox">Nenhum exame cadastrado ainda.</div>`;
   return `<div class="table-wrap" style="max-height:none;"><table>
-    <thead><tr><th>Status</th><th>Exame</th><th>Nomes alternativos</th><th>Laboratório</th><th>Convênio</th><th>Período</th><th class="right">Cota Princ.</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th></tr></thead>
+    <thead><tr><th>Status</th><th class="right">Qtd Total</th><th>Exame</th><th>Nomes alternativos</th><th>Laboratório</th><th>Convênio</th><th>Período</th><th class="right">Cota Princ.</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th></tr></thead>
     <tbody>${list.map(e=>`<tr>
       <td><span class="badge ${e.tipo==='ATIVO'?'ativo':'inativo'}">${e.tipo}</span></td>
+      <td class="right">${fmtNum(e.qtdTotal ?? (e.cotaPrincipal+e.cotaReserva))}</td>
       <td><b>${esc(e.descricao)}</b></td>
       <td>${(e.apelidos&&e.apelidos.length) ? esc(e.apelidos.join(', ')) : '—'}</td>
       <td>${esc(e.laboratorio)}</td>
@@ -1389,11 +1444,12 @@ function renderExamesRows(){
   const filtro = (document.getElementById('exFiltro')?.value||'').toLowerCase();
   let list = STATE.exames;
   if(filtro) list = list.filter(e=> e.descricao.toLowerCase().includes(filtro) || e.laboratorio.toLowerCase().includes(filtro) || (e.apelidos||[]).some(a=>a.toLowerCase().includes(filtro)));
-  if(list.length===0) return `<tr class="empty-row"><td colspan="11">Nenhum exame encontrado.</td></tr>`;
+  if(list.length===0) return `<tr class="empty-row"><td colspan="12">Nenhum exame encontrado.</td></tr>`;
   return list.map(e=>{
     const usada = usoCotaPrincipal(e.id);
     return `<tr>
       <td><span class="badge ${e.tipo==='ATIVO'?'ativo':'inativo'}">${e.tipo}</span></td>
+      <td class="right">${fmtNum(e.qtdTotal ?? (e.cotaPrincipal+e.cotaReserva))}</td>
       <td><b>${esc(e.descricao)}</b></td>
       <td style="white-space:normal;min-width:200px;">${renderApelidosCell(e)}</td>
       <td>${esc(e.laboratorio)}</td>
@@ -1452,14 +1508,18 @@ function saveExame(){
   const laboratorio = document.getElementById('exLab').value;
   if(!descricao){ showToast('Informe a descrição do exame.'); return; }
   if(!laboratorio){ showToast('Cadastre e selecione um laboratório.'); return; }
+  const qtdTotal = Math.max(0, Math.round(Number(document.getElementById('exQtdTotal').value)||0));
+  const convenio = document.getElementById('exConvenio').value;
+  const { cotaPrincipal, cotaReserva } = calcularCotas(qtdTotal, convenio);
   const dados = {
     tipo: document.getElementById('exTipo').value,
     descricao,
     laboratorio,
-    convenio: document.getElementById('exConvenio').value,
+    convenio,
     periodo: document.getElementById('exPeriodo').value.trim(),
-    cotaPrincipal: Number(document.getElementById('exCotaP').value)||0,
-    cotaReserva: Number(document.getElementById('exCotaR').value)||0,
+    qtdTotal,
+    cotaPrincipal,
+    cotaReserva,
     valorUnit: Number(document.getElementById('exValor').value)||0,
   };
   if(editingExameId){
@@ -1535,32 +1595,53 @@ function tipoConvenioEmUso(t){
   });
   return emExames || emLancamentos || emHistorico;
 }
+let editingTipoConvenioKey = null;
 function viewTiposConvenio(){
+  const editing = editingTipoConvenioKey ? STATE.tiposConvenio.find(t=>t.key===editingTipoConvenioKey) : null;
+  const usaReserva = editing ? !!editing.usaCotaReserva : false;
   return `
     <div class="helpbox">
       Aqui você cadastra os tipos de convênio/processo usados em todo o sistema (abas de Lançamento,
-      Cadastro de Exames, Emissão de N.F., Dashboard e Relatórios). <b>Alterar o nome de um tipo já
-      existente não afeta os dados já cadastrados/inseridos</b> — apenas o nome exibido é atualizado
-      em todos os campos do sistema. Ex.: "Compra Direta" → "Compra Direta - 2026/2027".
+      Cadastro de Exames, Emissão de N.F., Dashboard e Relatórios). <b>Alterar o nome ou a configuração
+      de cotas de um tipo já existente não afeta os dados já cadastrados/inseridos</b> — os exames que
+      já foram salvos mantêm a cota principal/reserva que tinham; a nova configuração só é aplicada aos
+      exames quando forem salvos/editados novamente no módulo Exames.
     </div>
     <div class="card edit-only">
-      <h2>Novo tipo de convênio/processo</h2>
-      <div class="subtitle">Informe o nome como deverá aparecer em todo o sistema.</div>
+      <h2>${editing ? '✏️ Editar tipo de convênio/processo' : 'Novo tipo de convênio/processo'}</h2>
+      <div class="subtitle">Informe o nome como deverá aparecer em todo o sistema e defina se os exames deste tipo terão cota principal e cota reserva, ou somente cota principal.</div>
       <div class="formgrid" style="grid-template-columns:3fr 1fr;">
-        <div class="field"><label>Nome do tipo de convênio/processo</label><input id="tcNovoLabel" placeholder="Ex: Pregão Eletrônico 002/2026"></div>
-        <div class="field" style="display:flex;align-items:flex-end;"><button class="btn" style="width:100%;" onclick="addTipoConvenio()">+ Adicionar</button></div>
+        <div class="field"><label>Nome do tipo de convênio/processo</label><input id="tcLabel" placeholder="Ex: Pregão Eletrônico 002/2026" value="${editing?esc(editing.label):''}"></div>
+        <div class="field" style="display:flex;align-items:flex-end;">
+          ${editing
+            ? `<button class="btn" style="width:100%;" onclick="saveTipoConvenio()">💾 Salvar</button>`
+            : `<button class="btn" style="width:100%;" onclick="saveTipoConvenio()">+ Adicionar</button>`}
+        </div>
       </div>
+      <div class="field" style="margin-top:6px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="tcUsaReserva" ${usaReserva?'checked':''} onchange="onToggleTcUsaReserva()" style="width:16px;height:16px;">
+          Os exames deste tipo têm cota principal <b>e</b> cota reserva (desmarque se for somente cota principal)
+        </label>
+      </div>
+      <div id="tcPercentuaisWrap" class="formgrid" style="margin-top:6px;display:${usaReserva?'grid':'none'};">
+        <div class="field"><label>% Cota Principal</label><input id="tcPctPrincipal" type="number" min="1" max="99" step="1" value="${editing?editing.pctPrincipal:75}" oninput="onChangeTcPct('principal')"></div>
+        <div class="field"><label>% Cota Reserva</label><input id="tcPctReserva" type="number" min="1" max="99" step="1" value="${editing?editing.pctReserva:25}" oninput="onChangeTcPct('reserva')"></div>
+      </div>
+      <div class="muted" style="font-size:11.5px;margin-top:4px;">Exemplo: Cota Principal 75% e Cota Reserva 25%, ou deixe a caixa acima desmarcada para Cota Principal 100% e Cota Reserva 0%. Os dois percentuais somados devem dar 100%.</div>
+      ${editing ? `<div style="margin-top:10px;"><button class="btn secondary small" onclick="cancelEditTipoConvenio()">Cancelar</button></div>` : ''}
     </div>
     <div class="card">
       <h2>Tipos cadastrados</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>Nome exibido</th><th></th></tr></thead>
+        <thead><tr><th>Nome exibido</th><th>Cotas</th><th></th></tr></thead>
         <tbody>
-          ${STATE.tiposConvenio.length===0 ? `<tr class="empty-row"><td colspan="2">Nenhum tipo cadastrado.</td></tr>` :
+          ${STATE.tiposConvenio.length===0 ? `<tr class="empty-row"><td colspan="3">Nenhum tipo cadastrado.</td></tr>` :
             STATE.tiposConvenio.map(t=>`<tr>
               <td><span class="badge ${t.badge}">${esc(t.label)}</span></td>
+              <td>${t.usaCotaReserva ? `Principal ${fmtNum(t.pctPrincipal)}% / Reserva ${fmtNum(t.pctReserva)}%` : 'Somente cota principal (100%)'}</td>
               <td class="edit-only">
-                <button class="btn ghost small" onclick="renameTipoConvenio('${t.key}')">✏️ Alterar nome</button>
+                <button class="btn ghost small" onclick="editTipoConvenio('${t.key}')">✏️ editar</button>
                 <button class="btn ghost small" onclick="deleteTipoConvenio('${t.key}')">🗑 excluir</button>
               </td>
             </tr>`).join('')}
@@ -1569,27 +1650,55 @@ function viewTiposConvenio(){
     </div>
   `;
 }
-function addTipoConvenio(){
-  if(semPermissao('tiposConvenio')) return;
-  const label = document.getElementById('tcNovoLabel').value.trim();
-  if(!label){ showToast('Informe o nome do novo tipo de convênio/processo.'); return; }
-  const key = slugKeyFromLabel(label);
-  const cadastroValue = label.toUpperCase();
-  const badge = BADGE_CLASSES[STATE.tiposConvenio.length % BADGE_CLASSES.length];
-  STATE.tiposConvenio.push({ key, label, cadastroValue, badge });
-  saveState(); render(); showToast('Tipo de convênio/processo cadastrado.');
+function onToggleTcUsaReserva(){
+  const checked = document.getElementById('tcUsaReserva').checked;
+  document.getElementById('tcPercentuaisWrap').style.display = checked ? 'grid' : 'none';
 }
-function renameTipoConvenio(key){
+function onChangeTcPct(qual){
+  const pP = document.getElementById('tcPctPrincipal');
+  const pR = document.getElementById('tcPctReserva');
+  let v = qual==='principal' ? Number(pP.value)||0 : Number(pR.value)||0;
+  v = Math.max(1, Math.min(99, Math.round(v)));
+  if(qual==='principal'){ pP.value = v; pR.value = 100 - v; }
+  else { pR.value = v; pP.value = 100 - v; }
+}
+function editTipoConvenio(key){
   if(semPermissao('tiposConvenio')) return;
-  const t = STATE.tiposConvenio.find(x=>x.key===key);
-  if(!t) return;
-  const novoNome = prompt('Novo nome para exibição deste tipo de convênio/processo:', t.label);
-  if(novoNome===null) return;
-  const nome = novoNome.trim();
-  if(!nome){ showToast('O nome não pode ficar em branco.'); return; }
-  t.label = nome;
-  saveState(); render();
-  showToast('Nome atualizado em todo o sistema. Os dados já cadastrados não foram alterados.');
+  editingTipoConvenioKey = key;
+  render();
+}
+function cancelEditTipoConvenio(){
+  editingTipoConvenioKey = null;
+  render();
+}
+function saveTipoConvenio(){
+  if(semPermissao('tiposConvenio')) return;
+  const label = document.getElementById('tcLabel').value.trim();
+  if(!label){ showToast('Informe o nome do tipo de convênio/processo.'); return; }
+  const usaCotaReserva = document.getElementById('tcUsaReserva').checked;
+  let pctPrincipal = 100, pctReserva = 0;
+  if(usaCotaReserva){
+    pctPrincipal = Math.max(1, Math.min(99, Math.round(Number(document.getElementById('tcPctPrincipal').value)||0)));
+    pctReserva = 100 - pctPrincipal;
+    if(pctReserva < 1 || pctReserva > 99){ showToast('Os percentuais de cota principal e reserva devem ficar entre 1% e 99% cada, somando 100%.'); return; }
+  }
+  if(editingTipoConvenioKey){
+    const t = STATE.tiposConvenio.find(x=>x.key===editingTipoConvenioKey);
+    if(!t){ editingTipoConvenioKey=null; render(); return; }
+    t.label = label;
+    t.usaCotaReserva = usaCotaReserva;
+    t.pctPrincipal = pctPrincipal;
+    t.pctReserva = pctReserva;
+    editingTipoConvenioKey = null;
+    saveState(); render();
+    showToast('Tipo de convênio/processo atualizado. Os exames já cadastrados não foram alterados; a nova configuração de cotas vale para os próximos exames salvos.');
+  } else {
+    const key = slugKeyFromLabel(label);
+    const cadastroValue = label.toUpperCase();
+    const badge = BADGE_CLASSES[STATE.tiposConvenio.length % BADGE_CLASSES.length];
+    STATE.tiposConvenio.push({ key, label, cadastroValue, badge, usaCotaReserva, pctPrincipal, pctReserva });
+    saveState(); render(); showToast('Tipo de convênio/processo cadastrado.');
+  }
 }
 function deleteTipoConvenio(key){
   if(semPermissao('tiposConvenio')) return;
@@ -1604,6 +1713,7 @@ function deleteTipoConvenio(key){
   STATE.tiposConvenio = STATE.tiposConvenio.filter(x=>x.key!==key);
   if(lancTab===key) lancTab = STATE.tiposConvenio[0].key;
   if(nfTab===key) nfTab = STATE.tiposConvenio[0].key;
+  if(editingTipoConvenioKey===key) editingTipoConvenioKey = null;
   saveState(); render(); showToast('Tipo de convênio/processo excluído.');
 }
 
