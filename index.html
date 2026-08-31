@@ -83,7 +83,20 @@ main{flex:1;min-width:0;padding:26px 34px 60px;}
 .grid.cols-3{grid-template-columns:repeat(3,1fr);}
 .grid.cols-2{grid-template-columns:repeat(2,1fr);}
 @media(max-width:1100px){.grid.cols-4{grid-template-columns:repeat(2,1fr);}.grid.cols-3{grid-template-columns:repeat(2,1fr);}}
-@media(max-width:640px){.grid.cols-4,.grid.cols-3,.grid.cols-2{grid-template-columns:1fr;} main{padding:18px;} .sidebar{position:fixed;z-index:40;transform:translateX(-100%);transition:transform .2s;} .sidebar.open{transform:translateX(0);} #menuBtn{display:inline-flex;}}
+.sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(10,30,35,.45);z-index:39;}
+.sidebar-backdrop.open{display:block;}
+@media(max-width:640px){
+  .grid.cols-4,.grid.cols-3,.grid.cols-2{grid-template-columns:1fr;}
+  main{padding:16px;}
+  #app{display:block;}
+  .sidebar{position:fixed;top:0;left:0;z-index:40;width:82vw;max-width:300px;transform:translateX(-100%);transition:transform .22s ease;}
+  .sidebar.open{transform:translateX(0);box-shadow:4px 0 24px rgba(0,0,0,.25);}
+  #menuBtn{display:inline-flex;}
+  .navitem{padding:12px 10px;font-size:14.5px;}
+  .topbar{gap:10px;}
+  .period-pill,.backup-group{width:100%;}
+  .backup-group{justify-content:flex-start;}
+}
 
 .stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);}
 .stat .label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);font-weight:600;}
@@ -272,6 +285,7 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
       <div style="margin-top:4px;"><a href="#" onclick="trocarCodigoAcesso();return false;" style="color:#fff;opacity:.6;font-size:10.5px;">Trocar código de acesso (avançado)</a></div>
     </div>
   </aside>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
   <main>
     <div class="topbar">
@@ -1008,31 +1022,37 @@ function usoCotaPrincipal(exameId){
     .reduce((s,l)=>s+l.qtdCP,0);
 }
 
-/* ---------------- Navigation ---------------- */
+/* ---------------- Navigation ----------------
+   Ordem sequencial do menu, do início ao fim do fluxo de trabalho:
+   Visão Geral (Dashboard) -> 1. Cadastros -> 2. Conferência ->
+   3. Lançamentos -> 4. Faturamento -> 5. Consolidado -> 6. Administração (só master).
+   Todos os perfis (comum, digitador, master) enxergam todos os módulos abaixo;
+   o que muda por perfil é se o módulo é somente leitura (ver podeEditar()) e,
+   no caso de "Administração", que fica visível apenas para o perfil master. */
 const NAV_BASE = [
   {group:'Visão Geral', items:[
     {id:'dashboard', label:'Dashboard', icon:'📊'},
   ]},
-  {group:'Cadastros', items:[
+  {group:'1. Cadastros', items:[
     {id:'labs', label:'Laboratórios', icon:'🏥'},
     {id:'exames', label:'Exames', icon:'🧾'},
     {id:'tiposConvenio', label:'Tipos de Convênio/Processo', icon:'📁'},
   ]},
-  {group:'Lançamentos', items:[
-    {id:'lancamento', label:'Lançar Exames', icon:'✍️'},
-  ]},
-  {group:'Faturamento', items:[
-    {id:'nf', label:'Emissão de N.F.', icon:'💵'},
-  ]},
-  {group:'Conferência', items:[
+  {group:'2. Conferência', items:[
     {id:'comparativo', label:'Comparativo entre Laboratórios', icon:'🔍'},
   ]},
-  {group:'Consolidado', items:[
+  {group:'3. Lançamentos', items:[
+    {id:'lancamento', label:'Lançar Exames', icon:'✍️'},
+  ]},
+  {group:'4. Faturamento', items:[
+    {id:'nf', label:'Emissão de N.F.', icon:'💵'},
+  ]},
+  {group:'5. Consolidado', items:[
     {id:'relatorios', label:'Relatórios', icon:'📁'},
   ]},
 ];
 const NAV_ADMIN = [
-  {group:'Administração', items:[
+  {group:'6. Administração', items:[
     {id:'usuarios', label:'Usuários', icon:'👤'},
     {id:'logAcesso', label:'Log de Acesso', icon:'📜'},
   ]},
@@ -1068,6 +1088,8 @@ function goto(view){
   document.getElementById('pageTitle').textContent = PAGE_META[view][0];
   document.getElementById('pageDesc').textContent = PAGE_META[view][1];
   document.getElementById('sidebar').classList.remove('open');
+  const bd = document.getElementById('sidebarBackdrop');
+  if(bd) bd.classList.remove('open');
   renderNav();
   registrarComando(PAGE_META[view][0]);
   render();
@@ -3182,9 +3204,15 @@ function viewLogAcesso(){
 }
 
 /* ---------------- Boot ---------------- */
-document.getElementById('menuBtn').addEventListener('click', ()=>{
-  document.getElementById('sidebar').classList.toggle('open');
-});
+function toggleSidebarMobile(forceClose){
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('sidebarBackdrop');
+  const willOpen = forceClose ? false : !sb.classList.contains('open');
+  sb.classList.toggle('open', willOpen);
+  bd.classList.toggle('open', willOpen);
+}
+document.getElementById('menuBtn').addEventListener('click', ()=> toggleSidebarMobile());
+document.getElementById('sidebarBackdrop').addEventListener('click', ()=> toggleSidebarMobile(true));
 
 async function bootAfterAccessCode(){
   await loadState();
