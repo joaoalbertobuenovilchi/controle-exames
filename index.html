@@ -1537,29 +1537,31 @@ function dashDadosFiltrados(){
       isCurrent: true
     });
   });
-  // Histórico fechado — usar porLaboratorio quando disponível
+  // Histórico fechado — usar h.lancamentos (snapshot individual salvo ao fechar competência)
   STATE.historico.forEach(h=>{
     const compLabel = h.mes+'/'+h.ano;
     const compSort = h.ano+'-'+String(MESES.indexOf(h.mes)+1).padStart(2,'0');
-    if(h.porLaboratorio && h.porLaboratorio.length>0){
-      h.porLaboratorio.forEach(pl=>{
-        const tipo = STATE.tiposConvenio.find(t=>t.cadastroValue===pl.convenio || t.key===pl.convenio);
+    if(h.lancamentos && h.lancamentos.length>0){
+      // Snapshot dos lançamentos individuais (forma mais completa)
+      h.lancamentos.forEach(l=>{
+        const tipo = STATE.tiposConvenio.find(t=>t.key===l.convenio);
+        const ex = STATE.exames.find(e=>e.id===l.exameId);
         allLancs.push({
           competencia: compLabel, compSort,
-          laboratorio: pl.laboratorio||'',
-          convenioKey: tipo?tipo.key:(pl.convenio||''),
-          convenioLabel: tipo?tipo.label:(pl.convenio||''),
-          tipoProcesso: tipo?tipo.label:(pl.convenio||''),
-          vigencia: pl.periodo||'',
-          exame: pl.exame || pl.descricao || '',
-          quantidade: Number(pl.quantidade)||0,
-          valorUnit: Number(pl.valorUnit)||0,
-          valorTotal: Number(pl.valorTotal)||Number(pl.valor)||0,
+          laboratorio: l.laboratorio || (ex?ex.laboratorio:''),
+          convenioKey: l.convenio||'',
+          convenioLabel: tipo?tipo.label:(l.convenio||''),
+          tipoProcesso: tipo?tipo.label:(l.convenio||''),
+          vigencia: ex?ex.periodo:'',
+          exame: l.exameDescricao || (ex?ex.descricao:'') || '',
+          quantidade: Number(l.quantidade)||0,
+          valorUnit: Number(l.valorUnit)||0,
+          valorTotal: Number(l.valorTotal)||0,
           isCurrent: false
         });
       });
     } else {
-      // fallback para histórico antigo sem detalhamento
+      // Fallback para histórico antigo sem snapshot de lançamentos (só totais por convênio)
       const pc = getPeriodoPorConvenio(h);
       Object.entries(pc).forEach(([key, v])=>{
         const tipo = STATE.tiposConvenio.find(t=>t.key===key);
@@ -1568,7 +1570,7 @@ function dashDadosFiltrados(){
             competencia: compLabel, compSort,
             laboratorio: '', convenioKey: key, convenioLabel: tipo?tipo.label:key,
             tipoProcesso: tipo?tipo.label:key, vigencia: '',
-            exame: '', quantidade: v.qtd, valorUnit: 0, valorTotal: v.valor, isCurrent: false
+            exame: '', quantidade: Number(v.qtd)||0, valorUnit: 0, valorTotal: Number(v.valor)||0, isCurrent: false
           });
         }
       });
@@ -1584,9 +1586,8 @@ function dashDadosFiltrados(){
   });
 }
 
-/* Opções únicas para os filtros, extraídas dos dados */
+/* Opções únicas para os filtros, extraídas de TODOS os dados (sem filtro aplicado) */
 function dashOpcoesFiltros(){
-  const allLancs = dashDadosFiltrados(); // sem filtros — usar todos
   const todos = [];
   STATE.lancamentos.forEach(l=>{
     const ex = STATE.exames.find(e=>e.id===l.exameId);
@@ -1600,13 +1601,18 @@ function dashOpcoesFiltros(){
   });
   STATE.historico.forEach(h=>{
     const cl = h.mes+'/'+h.ano;
-    if(h.porLaboratorio){
-      h.porLaboratorio.forEach(pl=>{
-        const tipo = STATE.tiposConvenio.find(t=>t.cadastroValue===pl.convenio||t.key===pl.convenio);
-        todos.push({ laboratorio: pl.laboratorio||'', convenioLabel: tipo?tipo.label:(pl.convenio||''), vigencia: pl.periodo||'', competencia: cl });
+    if(h.lancamentos && h.lancamentos.length>0){
+      h.lancamentos.forEach(l=>{
+        const tipo = STATE.tiposConvenio.find(t=>t.key===l.convenio);
+        const ex = STATE.exames.find(e=>e.id===l.exameId);
+        todos.push({ laboratorio: l.laboratorio||(ex?ex.laboratorio:''), convenioLabel: tipo?tipo.label:(l.convenio||''), vigencia: ex?ex.periodo:'', competencia: cl });
       });
     } else {
-      todos.push({ laboratorio:'', convenioLabel:'', vigencia:'', competencia: cl });
+      const pc = getPeriodoPorConvenio(h);
+      Object.entries(pc).forEach(([key])=>{
+        const tipo = STATE.tiposConvenio.find(t=>t.key===key);
+        todos.push({ laboratorio:'', convenioLabel: tipo?tipo.label:key, vigencia:'', competencia: cl });
+      });
     }
   });
   return {
