@@ -76,6 +76,12 @@ main{flex:1;min-width:0;padding:26px 34px 60px;}
 .card h2.sortable-title:hover{color:var(--teal);}
 .card h2.sortable-title:hover .sort-ic{background:var(--teal);color:#fff;}
 .card h2.sortable-title .sort-ic{font-size:10px;font-weight:700;color:var(--teal-dark);background:var(--teal-soft);padding:2px 7px;border-radius:999px;letter-spacing:.03em;transition:all .12s;}
+th.th-sortable{cursor:pointer;user-select:none;white-space:nowrap;transition:color .12s;}
+th.th-sortable:hover{color:var(--teal);}
+th.th-sortable .sort-ic-th{font-size:9px;opacity:.55;}
+th.th-sortable:hover .sort-ic-th{opacity:1;}
+th.th-sortable-active{color:var(--teal-dark);}
+th.th-sortable-active .sort-ic-th{opacity:1;}
 .card .subtitle{font-size:12px;color:var(--ink-soft);margin-bottom:14px;}
 
 .grid{display:grid;gap:16px;}
@@ -722,6 +728,50 @@ function calcularCotas(qtdTotal, convenioCadastroValue){
   const cotaPrincipal = qtdTotal - cotaReserva;
   return { cotaPrincipal, cotaReserva };
 }
+/* Recalcula a cota principal/reserva de TODOS os exames cadastrados, de acordo com a
+   configuração ATUAL do tipo de convênio/processo de cada um (módulo Tipos de Convênio/
+   Processo), e em seguida reprocessa os lançamentos já existentes de cada exame (em ordem
+   cronológica) para refletir a nova divisão — sem excluir nem duplicar nenhum lançamento,
+   apenas corrigindo quanto de cada um foi consumido de cota principal x cota reserva.
+   Resolve o caso em que um tipo foi alterado (ex.: de "com cota reserva" para "somente
+   cota principal") depois que já existiam exames/lançamentos usando a configuração antiga. */
+function recalcularTodasCotas(){
+  if(semPermissao('tiposConvenio')) return;
+  if(!confirm('Isso vai recalcular a divisão entre Cota Principal e Cota Reserva de TODOS os exames cadastrados, usando a configuração ATUAL de cada tipo de convênio/processo, e também vai reprocessar os lançamentos já realizados para essa nova divisão (nenhum lançamento é excluído). Deseja continuar?')) return;
+
+  let examesAlterados = 0;
+  (STATE.exames||[]).forEach(e=>{
+    const qtdTotal = e.qtdTotal ?? ((Number(e.cotaPrincipal)||0) + (Number(e.cotaReserva)||0));
+    const nova = calcularCotas(qtdTotal, e.convenio);
+    if(nova.cotaPrincipal !== e.cotaPrincipal || nova.cotaReserva !== e.cotaReserva){
+      e.cotaPrincipal = nova.cotaPrincipal;
+      e.cotaReserva = nova.cotaReserva;
+      examesAlterados++;
+    }
+  });
+
+  // Reprocessa os lançamentos de cada exame, em ordem de data, refazendo a alocação
+  // sequencial (cota principal primeiro, cota reserva depois), igual ao que acontece
+  // ao lançar um exame novo — só que agora usando a cota já corrigida do exame.
+  const porExame = {};
+  (STATE.lancamentos||[]).forEach(l=>{ (porExame[l.exameId] = porExame[l.exameId]||[]).push(l); });
+  Object.keys(porExame).forEach(exameId=>{
+    const exame = STATE.exames.find(e=>e.id===exameId);
+    if(!exame) return;
+    const lancs = porExame[exameId].slice().sort((a,b)=> String(a.data||'').localeCompare(String(b.data||'')));
+    let usadoCP = 0;
+    lancs.forEach(l=>{
+      const restoCP = Math.max((Number(exame.cotaPrincipal)||0) - usadoCP, 0);
+      const novoCP = Math.min(l.quantidade, restoCP);
+      const novoCR = l.quantidade - novoCP;
+      l.qtdCP = novoCP; l.qtdCR = novoCR;
+      usadoCP += novoCP;
+    });
+  });
+
+  saveState(); render();
+  showToast(`Cotas recalculadas: ${examesAlterados} exame(s) atualizado(s) e lançamentos reprocessados.`);
+}
 /* Garante que todo exame cadastrado (inclusive os já existentes, criados antes deste campo
    existir) tenha uma "Quantidade Total" definida. Para exames antigos, calcula a partir da
    soma das cotas já cadastradas (cotaPrincipal + cotaReserva) — ou seja, NÃO altera nenhum
@@ -980,13 +1030,23 @@ function frReplaceLanc(){
   saveState(); render(); showToast('Substituição concluída.');
 }
 
+/* Rótulo amigável de um resultado, exibido na lista de prévia "ao vivo" do painel
+   Localizar/Substituir/Excluir, para cada escopo (laboratórios, exames, lançamentos). */
+function frResultLabel(scope, item){
+  if(scope==='labs') return esc(item.nome);
+  if(scope==='exames') return `<b>${esc(item.descricao)}</b> <span class="muted">— ${esc(item.laboratorio)} · ${esc(item.convenio)}</span>`;
+  if(scope==='lanc') return `<b>${esc(item.exameDescricao)}</b> <span class="muted">— ${esc(item.paciente)}</span>`;
+  return esc(String(item.id||''));
+}
 function findReplacePanel(scope, fieldOptions, matchCountFn, deleteFn, replaceFn){
   const st = frState[scope];
-  const count = st.term.trim() ? matchCountFn().length : 0;
+  const matches = st.term.trim() ? matchCountFn() : [];
+  const count = matches.length;
+  const PREVIEW_LIMIT = 8;
   return `
   <div class="card">
     <h2>🔍 Localizar, substituir e excluir</h2>
-    <div class="subtitle">Busque por um campo, substitua o texto encontrado em todos os resultados, ou exclua ${scope==='lanc'?'as linhas inteiras dos lançamentos':'os registros'} correspondentes.</div>
+    <div class="subtitle">Busque por um campo, substitua o texto encontrado em todos os resultados, ou exclua ${scope==='lanc'?'as linhas inteiras dos lançamentos':'os registros'} correspondentes. Os resultados aparecem conforme você digita.</div>
     <div class="formgrid" style="grid-template-columns:1.1fr 1.4fr 1.4fr auto auto;align-items:end;">
       <div class="field"><label>Campo</label>
         <select onchange="frSet('${scope}','field',this.value); render();">
@@ -1001,7 +1061,19 @@ function findReplacePanel(scope, fieldOptions, matchCountFn, deleteFn, replaceFn
         <button class="btn danger" onclick="${deleteFn}()">🗑 Excluir</button>
       </div>
     </div>
-    ${st.term.trim() ? `<div class="helpbox" style="margin-top:10px;">${count} registro(s) encontrado(s)${count>0?' — confira antes de excluir; a exclusão não pode ser desfeita.':''}</div>` : ''}
+    ${st.term.trim() ? `
+      <div class="helpbox" style="margin-top:10px;">${count} registro(s) encontrado(s)${count>0?' — confira antes de excluir; a exclusão não pode ser desfeita.':''}</div>
+      ${count>0 ? `
+      <div class="table-wrap" style="margin-top:8px;max-height:220px;">
+        <table>
+          <tbody>
+            ${matches.slice(0,PREVIEW_LIMIT).map(m=>`<tr><td style="font-size:12.5px;">${frResultLabel(scope,m)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${count>PREVIEW_LIMIT ? `<div class="muted" style="font-size:11.5px;margin-top:4px;">Mostrando os primeiros ${PREVIEW_LIMIT} de ${count} resultados.</div>` : ''}
+      ` : ''}
+    ` : ''}
   </div>`;
 }
 
@@ -1430,7 +1502,7 @@ function viewExames(){
         desses nomes. Adicionar ou remover apelidos não altera nem apaga nenhum dado já lançado.
       </div>
       <div class="table-wrap" style="margin-top:10px;"><table>
-        <thead><tr><th>Status</th><th class="right">Qtd Total</th><th>Exame</th><th>Nomes alternativos</th><th>Laboratório</th><th>Convênio</th><th>Período</th><th class="right">Cota Princ.</th><th class="right">Usada</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th><th></th></tr></thead>
+        <thead><tr><th>Status</th><th class="right">Qtd Total</th>${thExamesSortable('descricao','Exame')}<th>Nomes alternativos</th>${thExamesSortable('laboratorio','Laboratório')}${thExamesSortable('convenio','Convênio')}${thExamesSortable('periodo','Período')}<th class="right">Cota Princ.</th><th class="right">Usada</th><th class="right">Cota Reser.</th><th class="right">Vlr. Unit.</th><th></th></tr></thead>
         <tbody>${renderExamesRows()}</tbody>
       </table></div>
       <div id="printListaExames" style="display:none;">
@@ -1462,10 +1534,43 @@ function renderListaExamesPrintTable(){
     </tr>`).join('')}</tbody>
   </table></div>`;
 }
+/* ---------------- Ordenação por coluna na lista "Exames cadastrados" ----------------
+   Clicar no cabeçalho Exame / Laboratório / Convênio ordena em ordem alfabética; clicar
+   de novo inverte a ordem. Clicar em Período ordena por ano (do mais atual para o mais
+   antigo primeiro); clicar de novo inverte (mais antigo para o mais atual). */
+let examesSort = { field: null, dir: 1 };
+function sortExamesByCol(field){
+  if(examesSort.field===field) examesSort.dir *= -1;
+  else { examesSort.field = field; examesSort.dir = 1; }
+  render();
+}
+function periodoSortKey(periodo){
+  const m = String(periodo||'').match(/\d{4}/);
+  return m ? parseInt(m[0],10) : -Infinity;
+}
+function thExamesSortable(field, label){
+  const active = examesSort.field===field;
+  const arrow = active ? (examesSort.dir===1 ? '▲' : '▼') : '⇅';
+  const title = field==='periodo'
+    ? 'Clique para ordenar do mais atual para o mais antigo'
+    : 'Clique para ordenar em ordem alfabética';
+  return `<th class="th-sortable ${active?'th-sortable-active':''}" onclick="sortExamesByCol('${field}')" title="${title}">${esc(label)} <span class="sort-ic-th">${arrow}</span></th>`;
+}
 function renderExamesRows(){
   const filtro = (document.getElementById('exFiltro')?.value||'').toLowerCase();
   let list = STATE.exames;
   if(filtro) list = list.filter(e=> e.descricao.toLowerCase().includes(filtro) || e.laboratorio.toLowerCase().includes(filtro) || (e.apelidos||[]).some(a=>a.toLowerCase().includes(filtro)));
+  if(examesSort.field){
+    list = list.slice().sort((a,b)=>{
+      let cmp;
+      if(examesSort.field==='periodo'){
+        cmp = periodoSortKey(b.periodo) - periodoSortKey(a.periodo); // base: mais atual primeiro
+      } else {
+        cmp = String(a[examesSort.field]||'').localeCompare(String(b[examesSort.field]||''), 'pt-BR', {sensitivity:'base'});
+      }
+      return cmp * examesSort.dir;
+    });
+  }
   if(list.length===0) return `<tr class="empty-row"><td colspan="12">Nenhum exame encontrado.</td></tr>`;
   return list.map(e=>{
     const usada = usoCotaPrincipal(e.id);
@@ -1627,7 +1732,18 @@ function viewTiposConvenio(){
       Cadastro de Exames, Emissão de N.F., Dashboard e Relatórios). <b>Alterar o nome ou a configuração
       de cotas de um tipo já existente não afeta os dados já cadastrados/inseridos</b> — os exames que
       já foram salvos mantêm a cota principal/reserva que tinham; a nova configuração só é aplicada aos
-      exames quando forem salvos/editados novamente no módulo Exames.
+      exames quando forem salvos/editados novamente no módulo Exames. Se precisar que a configuração
+      atual valha também para exames e lançamentos já existentes (por exemplo, depois de mudar um tipo
+      de "com cota reserva" para "somente cota principal"), use o botão "Recalcular cotas" abaixo.
+    </div>
+    <div class="card edit-only">
+      <div class="flexrow">
+        <div>
+          <h2 style="margin:0;">🔄 Recalcular cotas de todos os exames</h2>
+          <div class="subtitle" style="margin-bottom:0;">Reaplica a configuração atual de cada tipo de convênio/processo à cota principal/reserva de todos os exames já cadastrados, e reprocessa os lançamentos existentes de acordo — corrige casos como exames aparecendo com Cota Reserva mesmo em tipos configurados como "somente cota principal". Nenhum lançamento é excluído.</div>
+        </div>
+        <button class="btn secondary" onclick="recalcularTodasCotas()">🔄 Recalcular cotas</button>
+      </div>
     </div>
     <div class="card edit-only">
       <h2>${editing ? '✏️ Editar tipo de convênio/processo' : 'Novo tipo de convênio/processo'}</h2>
@@ -1751,8 +1867,32 @@ function viewLancamento(){
   const totCP = lancsTab.reduce((s,l)=>s+l.qtdCP,0);
   const totCR = lancsTab.reduce((s,l)=>s+l.qtdCR,0);
   const totValor = lancsTab.reduce((s,l)=>s+l.valorTotal,0);
+  const atualTem = STATE.lancamentos.length>0;
+  const closedSorted = STATE.historico.slice().sort((a,b)=> (b.ano-a.ano) || (MESES.indexOf(b.mes)-MESES.indexOf(a.mes)));
 
   return `
+    <div class="card edit-only">
+      <div class="flexrow">
+        <div>
+          <h2 style="margin:0;">Fechar competência atual</h2>
+          <div class="subtitle">Consolida os lançamentos de ${STATE.competencia.mes}/${STATE.competencia.ano} no histórico e libera a competência seguinte — substitui a macro "Criar Backup Interno" da planilha original.</div>
+        </div>
+        <button class="btn" ${atualTem?'':'disabled'} onclick="fecharCompetencia()">📦 Fechar ${STATE.competencia.mes}/${STATE.competencia.ano}</button>
+      </div>
+      ${closedSorted.length>0 ? `
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+        <div class="field" style="margin:0;min-width:240px;">
+          <label>Competência fechada para restaurar</label>
+          <select id="restCompSel">
+            ${closedSorted.map(h=>`<option value="${h.id}">${h.mes}/${h.ano} — ${esc(h.nomeBase)}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn secondary" ${atualTem?'disabled':''} onclick="restaurarCompetencia()" title="${atualTem?'Feche ou limpe os lançamentos da competência atual antes de restaurar uma competência fechada.':''}">↩️ Restaurar competência fechada</button>
+      </div>
+      <div class="muted" style="font-size:11.5px;margin-top:6px;">Restaurar traz de volta os lançamentos da competência escolhida para esta tela e a torna a competência atual novamente (saindo do histórico) — use quando precisar corrigir algo sem refazer todo o processo. Só é possível restaurar quando não houver lançamentos na competência atual; feche-a (ou exclua os lançamentos) antes de restaurar.</div>
+      ` : ''}
+    </div>
+
     <div class="tabs">
       ${STATE.tiposConvenio.map(c=>`<div class="tab ${lancTab===c.key?'active':''}" onclick="setLancTab('${c.key}')">${esc(c.label)}</div>`).join('')}
     </div>
@@ -2342,18 +2482,7 @@ function viewRelatorios(){
   const rows = STATE.historico.slice().sort((a,b)=> (a.ano-b.ano) || (MESES.indexOf(a.mes)-MESES.indexOf(b.mes)));
   const totQtd = rows.reduce((s,r)=>s+r.qtdTotal,0);
   const totValor = rows.reduce((s,r)=>s+r.valorTotal,0);
-  const atualTem = STATE.lancamentos.length>0;
   return `
-    <div class="card edit-only">
-      <div class="flexrow">
-        <div>
-          <h2 style="margin:0;">Fechar competência atual</h2>
-          <div class="subtitle">Consolida os lançamentos de ${STATE.competencia.mes}/${STATE.competencia.ano} no histórico e libera a competência seguinte — substitui a macro "Criar Backup Interno" da planilha original.</div>
-        </div>
-        <button class="btn" ${atualTem?'':'disabled'} onclick="fecharCompetencia()">📦 Fechar ${STATE.competencia.mes}/${STATE.competencia.ano}</button>
-      </div>
-    </div>
-
     ${viewRelatorioPersonalizado()}
 
     <div class="section-title">Modelos prontos</div>
@@ -2441,6 +2570,31 @@ function fecharCompetencia(){
   else { STATE.competencia = {mes:MESES[idx+1], ano:STATE.competencia.ano}; }
 
   saveState(); render(); showToast('Competência fechada e arquivada no histórico.');
+}
+/* Restaura uma competência já fechada (do histórico) de volta para a lista de
+   Lançamentos, tornando-a a competência atual — sem apagar nada, apenas move os
+   dados de volta. Útil quando é preciso corrigir algo de uma competência anterior
+   sem precisar refazer todo o processo de lançamento/fechamento novamente.
+   Só é permitido quando a competência atual estiver vazia (sem lançamentos), para
+   não haver risco de misturar ou perder lançamentos já em andamento. */
+function restaurarCompetencia(){
+  if(!isMaster()){ showToast('Apenas o administrador pode restaurar uma competência fechada.'); return; }
+  const sel = document.getElementById('restCompSel');
+  const id = sel && sel.value;
+  const h = STATE.historico.find(x=>x.id===id);
+  if(!h){ showToast('Selecione uma competência fechada para restaurar.'); return; }
+  if(STATE.lancamentos.length>0){
+    showToast(`Feche ou exclua os lançamentos da competência atual (${STATE.competencia.mes}/${STATE.competencia.ano}) antes de restaurar uma competência fechada.`);
+    return;
+  }
+  if(!confirm(`Restaurar a competência ${h.mes}/${h.ano} (${h.nomeBase})? Ela sairá do histórico e voltará a ser a competência atual, com todos os lançamentos que tinha, para você corrigir o que for preciso. Depois, feche novamente para arquivá-la.`)) return;
+
+  STATE.lancamentos = JSON.parse(JSON.stringify(h.lancamentos||[]));
+  STATE.competencia = { mes: h.mes, ano: h.ano };
+  STATE.historico = STATE.historico.filter(x=>x.id!==h.id);
+
+  saveState(); render();
+  showToast(`Competência ${h.mes}/${h.ano} restaurada. Lembre-se de fechá-la novamente após os ajustes.`);
 }
 
 /* ============================================================
