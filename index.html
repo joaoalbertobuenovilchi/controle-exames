@@ -2332,29 +2332,20 @@ function setNfTab(t){ nfTab=t; render(); }
 function setNfComp(v){ nfComp=v; nfLabFilter='TODOS'; render(); }
 function setNfLabFilter(v){ nfLabFilter=v; render(); }
 
-/* Agrupa os lançamentos por exame e aplica a mesma regra de distribuição
-   75% Cota Principal / 25% Cota Reserva usada no relatório "Por Exame" do
-   módulo Relatórios (calcularDistribuicaoCPCR), somando os totais por cota.
-   Isso garante que a Emissão de N.F. mostre os MESMOS totais de quantidade e
-   valor de Cota Principal e Cota Reserva que já aparecem em Relatórios, para
-   qualquer tipo de convênio/processo. É apenas um cálculo de exibição — não
-   altera nenhum lançamento nem dado já cadastrado no sistema. */
+/* Agrupa os lançamentos por exame e soma a divisão REAL entre Cota Principal e
+   Cota Reserva de cada lançamento (qtdCP/qtdCR, calculada no momento do lançamento
+   a partir da cota do próprio exame — que por sua vez segue a configuração do tipo
+   de convênio/processo em "Tipos de Convênio/Processo"). O valor de cada cota é
+   calculado usando o valor unitário de cada lançamento, garantindo que a soma bata
+   exatamente com o total e que tipos "somente cota principal" nunca apareçam com
+   Cota Reserva. É apenas um cálculo de exibição — não altera nenhum lançamento. */
 function computeCotaTotais(lancs){
-  const porExame = new Map();
-  lancs.forEach(l=>{
-    const k = l.exameDescricao;
-    if(!porExame.has(k)) porExame.set(k, {qtd:0, valor:0});
-    const g = porExame.get(k);
-    g.qtd += l.quantidade;
-    g.valor += l.valorTotal;
-  });
   let qtdCP=0, valCP=0, qtdCR=0, valCR=0;
-  porExame.forEach(g=>{
-    const { cp, cr } = calcularDistribuicaoCPCR(g.qtd);
-    const avgUnit = g.qtd>0 ? (g.valor/g.qtd) : 0;
-    const vcp = round2(cp*avgUnit);
-    const vcr = round2(g.valor - vcp);
-    qtdCP += cp; valCP += vcp; qtdCR += cr; valCR += vcr;
+  lancs.forEach(l=>{
+    qtdCP += l.qtdCP;
+    qtdCR += l.qtdCR;
+    valCP += (l.qtdCP||0) * (l.valorUnit||0);
+    valCR += (l.qtdCR||0) * (l.valorUnit||0);
   });
   return { qtdCP, valCP: round2(valCP), qtdCR, valCR: round2(valCR) };
 }
@@ -2921,14 +2912,6 @@ function groupKeyFn(){
 function groupColLabel(){
   return {porExame:'Exame', porPaciente:'Paciente', porLab:'Laboratório', porMes:'Competência', porConvenio:'Convênio'}[reportSubTab] || '';
 }
-/* Distribui uma quantidade em 75% Cota Principal / 25% Cota Reserva, com arredondamento
-   padrão (0,4 arredonda para baixo, 0,5 arredonda para cima). O C.R. é sempre calculado
-   como o resto (qtd - cp), garantindo que a soma das duas partes bata exatamente com o total. */
-function calcularDistribuicaoCPCR(qtd){
-  const cp = Math.round(qtd * 0.75);
-  const cr = qtd - cp;
-  return { cp, cr };
-}
 function round2(v){ return Math.round((v + Number.EPSILON) * 100) / 100; }
 function groupRows(rows){
   const keyFn = groupKeyFn();
@@ -2940,18 +2923,15 @@ function groupRows(rows){
     g.qtd+=r.qtdExibida; g.qtdCP+=r.qtdCP; g.qtdCR+=r.qtdCR; g.valor+=r.valorExibido; g.registros++;
   });
   const list = Array.from(map.entries()).map(([chave,v])=>({chave,...v}));
-  // No relatório "Por Exame", a distribuição C.P./C.R. segue a regra fixa 75%/25%
-  // sobre a quantidade total do exame (em vez da soma bruta dos lançamentos individuais),
-  // e o valor de cada cota é rateado proporcionalmente sobre o valor total do exame —
-  // igual ao modelo de planilha (Qtd C.P./Valor C.P./Qtd C.R./Valor C.R./Valor Total).
+  // No relatório "Por Exame", o valor de cada cota é rateado proporcionalmente sobre
+  // o valor total do grupo, usando a Qtd C.P./Qtd C.R. REAL já somada acima (linha
+  // "g.qtdCP+=r.qtdCP; g.qtdCR+=r.qtdCR"), que reflete a cota de cada exame conforme
+  // configurado em "Tipos de Convênio/Processo" — nunca uma proporção fixa.
   if(reportSubTab==='porExame'){
     list.forEach(g=>{
-      const { cp, cr } = calcularDistribuicaoCPCR(g.qtd);
-      g.qtdCP = cp;
-      g.qtdCR = cr;
       const avgUnit = g.qtd>0 ? (g.valor/g.qtd) : 0;
       g.valorUnitMedio = avgUnit;
-      g.valorCP = round2(cp*avgUnit);
+      g.valorCP = round2(g.qtdCP*avgUnit);
       g.valorCR = round2(g.valor - g.valorCP); // resto, garante soma exata com o total
     });
   }
@@ -3055,8 +3035,8 @@ async function exportPorExameXLSX(){
   if(rows.length===0){ showToast('Nada para exportar.'); return; }
   if(typeof ExcelJS==='undefined'){ showToast('Biblioteca de exportação XLSX não carregou. Verifique sua conexão e tente novamente.'); return; }
 
-  // Garante que os grupos tragam valorCP/valorCR calculados (regra 75%/25%), independente
-  // de qual aba esteja ativa no momento do clique.
+  // Garante que os grupos tragam valorCP/valorCR calculados (a partir da Qtd C.P./C.R. real
+  // de cada lançamento), independente de qual aba esteja ativa no momento do clique.
   const savedTab = reportSubTab;
   reportSubTab = 'porExame';
   const list = groupRows(rows);
