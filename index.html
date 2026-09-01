@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Controle de Exames Laboratoriais</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
@@ -13,7 +16,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
 :root{
-  --bg:#F4F7F7;
+  --bg:#F2F6F7;
   --panel:#FFFFFF;
   --ink:#16323A;
   --ink-soft:#5B7480;
@@ -27,20 +30,27 @@
   --red-soft:#FBE7E5;
   --green:#3E8E5A;
   --green-soft:#E5F3EA;
+  --blue:#2A6CB7;
+  --blue-soft:#E1EEFB;
+  --purple:#5B3FA3;
+  --purple-soft:#EAE6F8;
   --radius:10px;
-  --shadow:0 1px 2px rgba(16,50,58,.06), 0 4px 14px rgba(16,50,58,.05);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --shadow:0 1px 2px rgba(16,50,58,.05), 0 4px 16px rgba(16,50,58,.04);
+  --shadow-hover:0 2px 4px rgba(16,50,58,.08), 0 8px 24px rgba(16,50,58,.06);
+  --transition:all .18s ease;
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
 *{box-sizing:border-box;}
-body{margin:0;background:var(--bg);color:var(--ink);}
+body{margin:0;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
 ::-webkit-scrollbar{height:8px;width:8px;}
 ::-webkit-scrollbar-thumb{background:#c7d6d6;border-radius:8px;}
 
 /* Layout */
 #app{display:flex;min-height:100vh;}
 .sidebar{
-  width:250px;flex:0 0 250px;background:linear-gradient(180deg,var(--teal-dark),#0C5A5A);
+  width:250px;flex:0 0 250px;background:linear-gradient(180deg,#083e3e 0%,var(--teal-dark) 40%,#0C5A5A 100%);
   color:#fff;padding:22px 14px;position:sticky;top:0;height:100vh;overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent;
 }
 .brand{display:flex;align-items:center;gap:10px;padding:0 8px 18px 8px;border-bottom:1px solid rgba(255,255,255,.15);margin-bottom:16px;}
 .brand-mark{width:34px;height:34px;border-radius:9px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:18px;}
@@ -51,10 +61,12 @@ nav.navlist{display:flex;flex-direction:column;gap:3px;}
 .navgroup-label{font-size:10px;text-transform:uppercase;letter-spacing:.09em;opacity:.55;margin:14px 10px 6px;}
 .navitem{
   display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;
-  font-size:13.5px;color:rgba(255,255,255,.85);transition:background .12s ease;user-select:none;
+  font-size:13.5px;color:rgba(255,255,255,.8);transition:var(--transition);user-select:none;
+  position:relative;
 }
-.navitem:hover{background:rgba(255,255,255,.08);}
-.navitem.active{background:#fff;color:var(--teal-dark);font-weight:600;}
+.navitem:hover{background:rgba(255,255,255,.1);color:#fff;transform:translateX(2px);}
+.navitem.active{background:rgba(255,255,255,.95);color:var(--teal-dark);font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.12);}
+.navitem.active:hover{transform:none;}
 .navitem .ic{width:18px;text-align:center;font-size:14px;}
 
 .side-footer{margin-top:22px;padding:12px 10px;background:rgba(255,255,255,.08);border-radius:8px;font-size:11px;line-height:1.5;opacity:.85;}
@@ -65,12 +77,16 @@ main{flex:1;min-width:0;padding:26px 34px 60px;}
 .topbar .desc{font-size:12.5px;color:var(--ink-soft);margin-top:3px;}
 .period-pill{
   display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
-  padding:7px 12px;border-radius:999px;font-size:12.5px;box-shadow:var(--shadow);
+  padding:7px 14px;border-radius:999px;font-size:12.5px;box-shadow:var(--shadow);transition:var(--transition);
 }
+.period-pill:hover{box-shadow:var(--shadow-hover);}
 .period-pill b{color:var(--teal-dark);}
+/* Atalhos de teclado overlay */
+.shortcuts-hint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:rgba(22,50,58,.9);color:#fff;padding:8px 16px;border-radius:8px;font-size:11px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:90;white-space:nowrap;backdrop-filter:blur(8px);}
+.shortcuts-hint.show{opacity:1;}
 .backup-group{display:flex;gap:8px;flex-wrap:wrap;}
 
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:18px;}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:18px;transition:box-shadow .18s ease;}
 .card h2{font-size:14.5px;margin:0 0 4px;font-weight:700;}
 .card h2.sortable-title{cursor:pointer;display:inline-flex;align-items:center;gap:8px;user-select:none;transition:color .12s;}
 .card h2.sortable-title:hover{color:var(--teal);}
@@ -89,6 +105,7 @@ th.th-sortable-active .sort-ic-th{opacity:1;}
 .grid.cols-3{grid-template-columns:repeat(3,1fr);}
 .grid.cols-2{grid-template-columns:repeat(2,1fr);}
 @media(max-width:1100px){.grid.cols-4{grid-template-columns:repeat(2,1fr);}.grid.cols-3{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:640px){.grid.cols-3{grid-template-columns:1fr;}}
 .sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(10,30,35,.45);z-index:39;}
 .sidebar-backdrop.open{display:block;}
 #menuBtn{display:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;cursor:pointer;}
@@ -105,8 +122,9 @@ th.th-sortable-active .sort-ic-th{opacity:1;}
   .backup-group{justify-content:flex-start;}
 }
 
-.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);}
-.stat .label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);font-weight:600;}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);transition:var(--transition);position:relative;overflow:hidden;}
+.stat:hover{box-shadow:var(--shadow-hover);transform:translateY(-1px);}
+.stat .label{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);font-weight:700;}
 .stat .value{font-size:24px;font-weight:800;color:var(--teal-dark);margin-top:6px;}
 .stat .hint{font-size:11px;color:var(--ink-soft);margin-top:4px;}
 
@@ -141,14 +159,18 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 
 .btn{
   border:none;cursor:pointer;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:8px;
-  background:var(--teal);color:#fff;display:inline-flex;align-items:center;gap:6px;transition:filter .12s;
+  background:var(--teal);color:#fff;display:inline-flex;align-items:center;gap:6px;transition:var(--transition);
 }
-.btn:hover{filter:brightness(1.08);}
+.btn:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 2px 8px rgba(14,110,110,.25);}
+.btn:active{transform:translateY(0);box-shadow:none;}
 .btn.secondary{background:var(--panel);color:var(--teal-dark);border:1px solid var(--line);}
+.btn.secondary:hover{background:#f7fafa;box-shadow:var(--shadow);}
 .btn.danger{background:var(--red-soft);color:var(--red);}
+.btn.danger:hover{box-shadow:0 2px 8px rgba(193,72,63,.15);}
 .btn.ghost{background:transparent;color:var(--ink-soft);padding:4px 8px;}
+.btn.ghost:hover{background:rgba(0,0,0,.04);box-shadow:none;transform:none;}
 .btn.small{padding:5px 10px;font-size:11.5px;}
-.btn:disabled{opacity:.5;cursor:not-allowed;}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none!important;box-shadow:none!important;}
 
 .formgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
 @media(max-width:900px){.formgrid{grid-template-columns:repeat(2,1fr);}}
@@ -163,11 +185,15 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 .tab.active{color:var(--teal-dark);border-bottom-color:var(--teal);}
 
 .toast{
-  position:fixed;bottom:22px;right:22px;background:var(--teal-dark);color:#fff;padding:12px 18px;
-  border-radius:9px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.18);z-index:100;opacity:0;
-  transform:translateY(8px);transition:all .25s ease;pointer-events:none;
+  position:fixed;bottom:22px;right:22px;background:var(--teal-dark);color:#fff;padding:13px 20px;
+  border-radius:10px;font-size:13px;box-shadow:0 8px 30px rgba(0,0,0,.2);z-index:100;opacity:0;
+  transform:translateY(12px) scale(.97);transition:all .3s cubic-bezier(.175,.885,.32,1.1);pointer-events:none;
+  max-width:420px;line-height:1.4;display:flex;align-items:center;gap:8px;
 }
-.toast.show{opacity:1;transform:translateY(0);}
+.toast.show{opacity:1;transform:translateY(0) scale(1);}
+.toast.toast-success{background:var(--green);}
+.toast.toast-error{background:var(--red);}
+.toast.toast-warning{background:#b5740a;}
 
 .helpbox{background:var(--teal-soft);border:1px solid #CFE7E5;color:var(--teal-dark);padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:14px;line-height:1.5;}
 .flexrow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
@@ -181,6 +207,33 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 .read-only-view .edit-only{display:none !important;}
 .read-only-notice{background:#fff8e1;border:1px solid #f0e0a0;border-radius:9px;padding:10px 14px;font-size:12.5px;color:#7a6a1f;margin-bottom:14px;}
 .right{text-align:right;}
+
+/* ── Dashboard melhorado ── */
+.dash-filtros{display:flex;gap:16px;flex-wrap:wrap;}
+.dash-filtro{flex:1;min-width:170px;}
+.dash-filtro .filtro-label{font-size:10px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;}
+.dash-filtro select{width:100%;padding:8px 28px 8px 10px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;font-weight:600;color:var(--ink);background:#fff;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%235B7480'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;cursor:pointer;transition:border .15s,box-shadow .15s;}
+.dash-filtro select:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 2px rgba(14,110,110,.12);}
+.btn-limpar-filtros{background:var(--amber-soft);border:1px solid #e8c88d;border-radius:7px;padding:5px 12px;cursor:pointer;font-size:11.5px;color:#8a5a1c;font-weight:600;}
+.btn-limpar-filtros:hover{filter:brightness(.96);}
+.insight-item{padding:10px 14px;border-radius:8px;font-size:12.5px;line-height:1.5;margin-bottom:8px;border-left:3px solid;}
+.insight-item.positivo{background:var(--green-soft);border-color:var(--green);color:var(--ink);}
+.insight-item.alerta{background:var(--amber-soft);border-color:var(--amber);color:var(--ink);}
+.insight-item.neutro{background:#EEF2F2;border-color:var(--ink-soft);color:var(--ink);}
+.dash-chart-tabs{display:flex;border-bottom:1px solid var(--line);overflow-x:auto;margin-bottom:0;}
+.dash-chart-tab{padding:10px 18px;border:none;cursor:pointer;font-size:12.5px;font-weight:600;background:#f7fafa;color:var(--ink-soft);border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;}
+.dash-chart-tab:hover{background:#eef4f5;}
+.dash-chart-tab.active{background:var(--panel);color:var(--teal-dark);border-bottom-color:var(--teal);}
+.dash-chart-panel{display:none;padding:18px 20px;}
+.dash-chart-panel.active{display:block;}
+.dash-chart-split{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+@media(max-width:900px){.dash-chart-split{grid-template-columns:1fr;}}
+.dash-ranking th{text-align:left;padding:8px 10px;font-size:11px;font-weight:700;color:var(--teal-dark);background:var(--teal-soft);border-bottom:2px solid var(--line);text-transform:uppercase;}
+.dash-ranking td{padding:8px 10px;border-bottom:1px solid var(--line);}
+.dash-ranking tr:hover{background:#fafcfc;}
+.pct-badge{display:inline-block;background:var(--teal-soft);color:var(--teal-dark);padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;}
+.proc-bar{margin-top:8px;background:var(--bg);border-radius:4px;height:5px;overflow:hidden;}
+.proc-bar-fill{height:100%;border-radius:4px;transition:width .5s;}
 
 /* Cabeçalho padrão dos relatórios */
 .report-header{border:1px solid var(--line);border-radius:var(--radius);background:var(--teal-soft);padding:14px 18px;margin-bottom:14px;}
@@ -224,7 +277,14 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 </head>
 <body>
 
-<div class="loading-screen" id="loadingScreen"><div class="spinner"></div>Carregando dados…</div>
+<div class="loading-screen" id="loadingScreen">
+  <div style="text-align:center;">
+    <div style="width:56px;height:56px;border-radius:14px;background:var(--teal-soft);display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:16px;">🧪</div>
+    <div class="spinner" style="margin:0 auto 12px;"></div>
+    <div style="font-size:13px;color:var(--ink-soft);">Carregando dados…</div>
+    <div style="font-size:10.5px;color:var(--ink-soft);opacity:.6;margin-top:4px;">Controle de Exames Laboratoriais</div>
+  </div>
+</div>
 
 <div id="configScreen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:300;display:none;align-items:center;justify-content:center;padding:20px;">
   <div class="card" style="max-width:520px;width:100%;">
@@ -236,10 +296,14 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
   </div>
 </div>
 
-<div id="loginScreen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:260;align-items:center;justify-content:center;padding:20px;">
-  <div class="card" style="max-width:400px;width:100%;">
-    <h2>🔐 Acesso ao sistema</h2>
-    <div class="subtitle">Informe seu usuário e senha para entrar no Controle de Exames Laboratoriais.</div>
+<div id="loginScreen" style="display:none;position:fixed;inset:0;background:linear-gradient(135deg,#083e3e 0%,var(--teal-dark) 40%,#0C5A5A 70%,var(--teal) 100%);z-index:260;align-items:center;justify-content:center;padding:20px;">
+  <div class="card" style="max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25);border:none;">
+    <div style="text-align:center;margin-bottom:16px;">
+      <div style="width:56px;height:56px;border-radius:14px;background:var(--teal-soft);display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:10px;">🧪</div>
+      <h2 style="margin:0 0 4px;">Acesso ao sistema</h2>
+      <div style="font-size:11px;color:var(--ink-soft);font-weight:600;letter-spacing:.03em;">CONTROLE DE EXAMES LABORATORIAIS</div>
+    </div>
+    <div class="subtitle" style="text-align:center;">Prefeitura Municipal de Jaborandi</div>
     <div class="field" style="margin-bottom:12px;">
       <label>Usuário</label>
       <input type="text" id="loginUsuario" placeholder="Ex.: joao" autocomplete="username" onkeydown="if(event.key==='Enter'){document.getElementById('loginSenha').focus();}">
@@ -795,7 +859,7 @@ let saving = false;
 function saveState(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
-    if(!firebaseOk){ showToast('Backend não configurado. Veja INSTRUCOES_BACKEND.md.'); return; }
+    if(!firebaseOk){ showToast('Backend não configurado.','warning') Veja INSTRUCOES_BACKEND.md.'); return; }
     const code = getAccessCode();
     if(!code) return;
     saving = true;
@@ -805,7 +869,7 @@ function saveState(){
         atualizadoEm: new Date().toISOString()
       });
     }catch(e){
-      showToast('Erro ao salvar dados na nuvem.');
+      showToast('Erro ao salvar dados na nuvem.','error');
       console.error(e);
     }finally{
       saving = false;
@@ -879,10 +943,15 @@ function csvHeaderBlock({convenio, laboratorio, vigencia, competenciaText}){
     ''
   ];
 }
-function showToast(msg){
+function showToast(msg, type){
   const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 2600);
+  t.className = 'toast'; // reset
+  const icons = {success:'✅ ', error:'❌ ', warning:'⚠️ '};
+  t.textContent = (icons[type]||'') + msg;
+  if(type) t.classList.add('toast-'+type);
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>t.classList.remove('show'), type==='error'?4000:2800);
 }
 
 /* ---------------- Impressão de relatórios (A4 paisagem) ----------------
@@ -983,7 +1052,7 @@ function frReplaceLabs(){
       STATE.historico.forEach(h=>{ (h.porLaboratorio||[]).forEach(pl=>{ if(pl.laboratorio===oldNome) pl.laboratorio=m.nome; }); });
     }
   });
-  saveState(); render(); showToast('Substituição concluída.');
+  saveState(); render(); showToast('Substituição concluída.','success');
 }
 function frDeleteExames(){
   if(semPermissao('exames')) return;
@@ -1007,7 +1076,7 @@ function frReplaceExames(){
       STATE.lancamentos.forEach(l=>{ if(l.exameId===e.id) l.exameDescricao=e.descricao; });
     }
   });
-  saveState(); render(); showToast('Substituição concluída.');
+  saveState(); render(); showToast('Substituição concluída.','success');
 }
 function frDeleteLanc(){
   if(semPermissao('lancamento')) return;
@@ -1027,7 +1096,7 @@ function frReplaceLanc(){
   const f = LANC_FIELD_MAP[field]||field;
   if(!confirm(`Substituir "${term}" por "${replace}" em ${matches.length} lançamento(s)?`)) return;
   matches.forEach(m=>{ m[f] = String(m[f]).replace(new RegExp(escapeRegExp(term),'ig'), replace); });
-  saveState(); render(); showToast('Substituição concluída.');
+  saveState(); render(); showToast('Substituição concluída.','success');
 }
 
 /* Rótulo amigável de um resultado, exibido na lista de prévia "ao vivo" do painel
@@ -1262,40 +1331,169 @@ function totalTipoAcrossPeriods(periods, key, field){
 }
 function viewDashboard(){
   const periods = allPeriodsData();
-  const qtdTotal = periods.reduce((s,p)=>s+p.qtdTotal,0);
-  const valorTotal = periods.reduce((s,p)=>s+p.valorTotal,0);
-  const ticket = qtdTotal>0 ? valorTotal/qtdTotal : 0;
-  const tipos = STATE.tiposConvenio;
-
-  if(periods.length===0){
+  if(periods.length===0 && STATE.lancamentos.length===0){
     return `<div class="card"><div class="helpbox">Nenhum dado ainda. Comece cadastrando laboratórios e exames, depois registre lançamentos em <b>Lançar Exames</b>.</div></div>`;
   }
 
-  const tipoCardsHTML = tipos.map(t=>{
-    const totTipo = totalTipoAcrossPeriods(periods, t.key, 'valor');
-    const pct = valorTotal>0 ? (totTipo/valorTotal*100) : 0;
-    return `<div class="stat"><div class="label">Total ${esc(t.label)}</div><div class="value" style="font-size:18px;">${fmtMoney(totTipo)}</div><div class="hint">${pct.toFixed(1)}% do total</div></div>`;
+  const lancs = dashDadosFiltrados();
+  const opcoes = dashOpcoesFiltros();
+  const qtdTotal = lancs.reduce((s,d)=>s+d.quantidade,0);
+  const valorTotal = lancs.reduce((s,d)=>s+d.valorTotal,0);
+  const ticket = qtdTotal>0 ? valorTotal/qtdTotal : 0;
+  const periodos = new Set(lancs.map(d=>d.competencia)).size;
+  const filtrosAtivos = [dashFiltroConvenio,dashFiltroLab,dashFiltroVigencia,dashFiltroCompetencia].filter(f=>f!=='Todos'&&f!=='Consolidado').length;
+
+  // Saudação inteligente
+  const hora = new Date().getHours();
+  const saudacao = hora<12?'Bom dia':hora<18?'Boa tarde':'Boa noite';
+  const nomeUsuario = currentUser ? (currentUser.nome||currentUser.usuario) : '';
+
+  // Resumo rápido da competência atual
+  const lancAtual = STATE.lancamentos.length;
+  const labsAtivos = STATE.labs.filter(l=>l.tipo==='ATIVO').length;
+  const examesAtivos = STATE.exames.filter(e=>e.tipo==='ATIVO').length;
+
+  // Cards por processo
+  const porProc = {};
+  lancs.forEach(d=>{ porProc[d.tipoProcesso]=(porProc[d.tipoProcesso]||0)+d.valorTotal; });
+  const procHTML = Object.entries(porProc).sort((a,b)=>b[1]-a[1]).map(([nome,valor],i)=>{
+    const pct = valorTotal>0 ? (valor/valorTotal*100).toFixed(1) : 0;
+    const cor = CHART_COLORS[i%CHART_COLORS.length];
+    return `<div class="stat"><div class="label">Total ${esc(nome)}</div><div class="value" style="font-size:18px;color:${cor};">${fmtMoney(valor)}</div><div class="proc-bar"><div class="proc-bar-fill" style="width:${pct}%;background:${cor};"></div></div><div class="hint">${pct}% do total</div></div>`;
   }).join('');
 
+  // Insights
+  const insights = dashGerarInsights(lancs);
+  const insightsHTML = insights.map(i=>`<div class="insight-item ${i.tipo}">${i.texto}</div>`).join('');
+
+  // Ranking
+  const porExame = {};
+  lancs.forEach(d=>{ if(!d.exame) return; if(!porExame[d.exame]) porExame[d.exame]={qtd:0,vu:d.valorUnit,vt:0}; porExame[d.exame].qtd+=d.quantidade; porExame[d.exame].vt+=d.valorTotal; });
+  const rankingHTML = Object.entries(porExame).sort(([,a],[,b])=>b.qtd-a.qtd).slice(0,10).map(([nome,v],i)=>{
+    const pct = qtdTotal>0 ? ((v.qtd/qtdTotal)*100).toFixed(1) : 0;
+    return `<tr><td style="color:var(--ink-soft);font-weight:700;font-size:11px;">${i+1}</td><td><b>${esc(nome)}</b></td><td class="right">${fmtNum(v.qtd)}</td><td class="right" style="color:var(--ink-soft);">${fmtMoney(v.vu)}</td><td class="right" style="font-weight:700;color:var(--teal-dark);">${fmtMoney(v.vt)}</td><td class="right"><span class="pct-badge">${pct}%</span></td></tr>`;
+  }).join('') || '<tr><td colspan="6" style="text-align:center;padding:22px;color:var(--ink-soft);">Sem dados para o período selecionado.</td></tr>';
+
+  const subComp = dashFiltroCompetencia==='Consolidado' ? 'todas as competências' : dashFiltroCompetencia;
+
   return `
-    <div class="flexrow" style="margin-bottom:14px;">
-      <div></div>
-      <button class="btn secondary small print-btn" onclick="printReport('dashboardPrint')">🖨️ Imprimir dashboard</button>
+    <div class="card" style="background:linear-gradient(135deg,var(--teal-soft) 0%,#dff0ef 100%);border-color:#c0e0dd;">
+      <div class="flexrow">
+        <div>
+          <div style="font-size:17px;font-weight:700;color:var(--teal-dark);">${saudacao}${nomeUsuario?', '+esc(nomeUsuario):''}! 👋</div>
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px;">
+            Competência atual: <b>${STATE.competencia.mes}/${STATE.competencia.ano}</b> · 
+            ${fmtNum(lancAtual)} lançamento(s) · ${fmtNum(labsAtivos)} lab(s) ativo(s) · ${fmtNum(examesAtivos)} exame(s) ativo(s)
+          </div>
+        </div>
+        <button class="btn secondary small print-btn" onclick="printReport('dashboardPrint')">🖨️ Imprimir dashboard</button>
+      </div>
     </div>
     <div id="dashboardPrint">
-      ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:'Todos os laboratórios', vigencia:'—', competenciaText:'Consolidado de todas as competências'})}
+      ${reportHeaderHTML({
+        convenio: dashFiltroConvenio==='Todos'?'Todos os convênios':dashFiltroConvenio,
+        laboratorio: dashFiltroLab==='Todos'?'Todos os laboratórios':dashFiltroLab,
+        vigencia: dashFiltroVigencia==='Todos'?'—':dashFiltroVigencia,
+        competenciaText: dashFiltroCompetencia==='Consolidado'?'Consolidado de todas as competências':dashFiltroCompetencia
+      })}
+
+      <!-- Filtros interativos -->
+      <div class="card" style="position:relative;">
+        <div class="dash-filtros">
+          <div class="dash-filtro">
+            <div class="filtro-label">Convênio</div>
+            <select onchange="dashSetFiltro('convenio',this.value)">
+              <option value="Todos">Todos os convênios</option>
+              ${opcoes.convenios.map(c=>`<option value="${esc(c)}" ${dashFiltroConvenio===c?'selected':''}>${esc(c)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="dash-filtro">
+            <div class="filtro-label">Laboratório</div>
+            <select onchange="dashSetFiltro('lab',this.value)">
+              <option value="Todos">Todos os laboratórios</option>
+              ${opcoes.labs.map(l=>`<option value="${esc(l)}" ${dashFiltroLab===l?'selected':''}>${esc(l)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="dash-filtro">
+            <div class="filtro-label">Vigência</div>
+            <select onchange="dashSetFiltro('vigencia',this.value)">
+              <option value="Todos">Todas as vigências</option>
+              ${opcoes.vigencias.map(v=>`<option value="${esc(v)}" ${dashFiltroVigencia===v?'selected':''}>${esc(v)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="dash-filtro">
+            <div class="filtro-label">Competência</div>
+            <select onchange="dashSetFiltro('competencia',this.value)">
+              <option value="Consolidado">Consolidado de todas as competências</option>
+              ${opcoes.competencias.map(c=>`<option value="${esc(c)}" ${dashFiltroCompetencia===c?'selected':''}>${esc(c)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        ${filtrosAtivos>0 ? `<div style="margin-top:10px;"><button class="btn-limpar-filtros" onclick="dashLimparFiltros()">✕ Limpar ${filtrosAtivos} filtro${filtrosAtivos>1?'s':''}</button></div>` : ''}
+      </div>
+
+      <!-- KPIs -->
       <div class="grid cols-4">
-        <div class="stat"><div class="label">Períodos registrados</div><div class="value">${periods.length}</div><div class="hint">competências com lançamentos</div></div>
-        <div class="stat"><div class="label">Total de exames realizados</div><div class="value">${fmtNum(qtdTotal)}</div><div class="hint">todas as competências</div></div>
+        <div class="stat"><div class="label">Períodos registrados</div><div class="value">${periodos}</div><div class="hint">competências com lançamentos</div></div>
+        <div class="stat"><div class="label">Total de exames realizados</div><div class="value">${fmtNum(qtdTotal)}</div><div class="hint">${esc(subComp)}</div></div>
         <div class="stat"><div class="label">Valor total geral</div><div class="value">${fmtMoney(valorTotal)}</div><div class="hint">soma de todos os convênios</div></div>
         <div class="stat"><div class="label">Ticket médio por exame</div><div class="value">${fmtMoney(ticket)}</div><div class="hint">valor total ÷ qtd. total</div></div>
       </div>
-      <div class="grid cols-4" style="margin-top:16px;">
-        ${tipoCardsHTML}
+      <div class="grid cols-3" style="margin-top:16px;">
+        ${procHTML || '<div class="stat"><div class="label">Sem processos</div><div class="value">—</div></div>'}
       </div>
-      <div class="grid cols-2" style="margin-top:16px;">
-        <div class="card"><h2>Valor total por tipo de convênio</h2><div class="subtitle">Comparativo entre os tipos de convênio/processo cadastrados</div><div class="chartbox"><canvas id="chartConv"></canvas></div></div>
-        <div class="card"><h2>Evolução do valor total por período</h2><div class="subtitle">Cada competência fechada + a competência atual</div><div class="chartbox"><canvas id="chartEvo"></canvas></div></div>
+
+      <!-- Insights inteligentes -->
+      <div class="card" style="margin-top:16px;">
+        <h2>🧠 Insights inteligentes</h2>
+        <div class="subtitle">Análise automática dos dados filtrados</div>
+        ${insightsHTML}
+      </div>
+
+      <!-- Gráficos com abas -->
+      <div class="card" style="padding:0;overflow:hidden;margin-top:16px;">
+        <div class="dash-chart-tabs">
+          <button class="dash-chart-tab ${dashChartTab==='convenio'?'active':''}" onclick="dashMudarAba('convenio')">Por Convênio</button>
+          <button class="dash-chart-tab ${dashChartTab==='evolucao'?'active':''}" onclick="dashMudarAba('evolucao')">Evolução Temporal</button>
+          <button class="dash-chart-tab ${dashChartTab==='laboratorio'?'active':''}" onclick="dashMudarAba('laboratorio')">Comparativo Labs</button>
+          <button class="dash-chart-tab ${dashChartTab==='distribuicao'?'active':''}" onclick="dashMudarAba('distribuicao')">Distribuição</button>
+        </div>
+        <div class="dash-chart-panel ${dashChartTab==='convenio'?'active':''}">
+          <h2>Valor total por tipo de convênio</h2>
+          <div class="subtitle">Comparativo entre os tipos de convênio/processo cadastrados</div>
+          <div class="chartbox"><canvas id="chartConv"></canvas></div>
+        </div>
+        <div class="dash-chart-panel ${dashChartTab==='evolucao'?'active':''}">
+          <h2>Evolução do valor total por período</h2>
+          <div class="subtitle">Cada competência fechada + a competência atual</div>
+          <div class="chartbox"><canvas id="chartEvo"></canvas></div>
+        </div>
+        <div class="dash-chart-panel ${dashChartTab==='laboratorio'?'active':''}">
+          <h2>Comparativo entre laboratórios</h2>
+          <div class="subtitle">Valor total, quantidade de exames e ticket médio por laboratório</div>
+          <div class="dash-chart-split">
+            <div><div class="subtitle" style="font-weight:700;color:var(--ink);margin-bottom:6px;">Valor total e quantidade</div><div class="chartbox"><canvas id="chartLabVal"></canvas></div></div>
+            <div><div class="subtitle" style="font-weight:700;color:var(--ink);margin-bottom:6px;">Ticket médio por laboratório</div><div class="chartbox"><canvas id="chartLabTick"></canvas></div></div>
+          </div>
+        </div>
+        <div class="dash-chart-panel ${dashChartTab==='distribuicao'?'active':''}">
+          <h2>Distribuição por tipo de processo</h2>
+          <div class="subtitle">Participação percentual de cada modalidade de aquisição</div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:40px;flex-wrap:wrap;">
+            <div style="position:relative;width:300px;height:280px;"><canvas id="chartPie"></canvas></div>
+            <div id="pieLegenda"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ranking de exames -->
+      <div class="card" style="margin-top:16px;">
+        <h2>Ranking de exames</h2>
+        <div class="subtitle">Os exames mais realizados no período selecionado</div>
+        <div class="table-wrap"><table class="dash-ranking">
+          <thead><tr><th>#</th><th>Exame</th><th class="right">Quantidade</th><th class="right">Valor Unit.</th><th class="right">Valor Total</th><th class="right">% do Total</th></tr></thead>
+          <tbody>${rankingHTML}</tbody>
+        </table></div>
       </div>
     </div>
   `;
@@ -1303,29 +1501,263 @@ function viewDashboard(){
 /* Paleta de cores do gráfico, na mesma ordem de BADGE_CLASSES */
 const CHART_COLORS = ['#0E6E6E','#D98A3D','#5B3FA3','#2E6B44','#A2392F','#28588F','#8A3B7C','#8A6A16'];
 function colorForTipoIndex(i){ return CHART_COLORS[i % CHART_COLORS.length]; }
-let chartConvRef=null, chartEvoRef=null;
+let chartConvRef=null, chartEvoRef=null, chartLabValRef=null, chartLabTickRef=null, chartPieRef=null;
+let dashFiltroConvenio='Todos', dashFiltroLab='Todos', dashFiltroVigencia='Todos', dashFiltroCompetencia='Consolidado';
+let dashChartTab='convenio';
+
+function dashSetFiltro(campo, valor){
+  if(campo==='convenio') dashFiltroConvenio=valor;
+  if(campo==='lab') dashFiltroLab=valor;
+  if(campo==='vigencia') dashFiltroVigencia=valor;
+  if(campo==='competencia') dashFiltroCompetencia=valor;
+  render();
+}
+function dashLimparFiltros(){ dashFiltroConvenio='Todos'; dashFiltroLab='Todos'; dashFiltroVigencia='Todos'; dashFiltroCompetencia='Consolidado'; render(); }
+function dashMudarAba(aba){ dashChartTab=aba; render(); }
+
+/* Gera dados detalhados para o dashboard filtrável: cada lançamento expandido com os metadados do exame */
+function dashDadosFiltrados(){
+  const allLancs = [];
+  // Competência atual
+  STATE.lancamentos.forEach(l=>{
+    const ex = STATE.exames.find(e=>e.id===l.exameId);
+    const tipo = STATE.tiposConvenio.find(t=>t.key===l.convenio);
+    allLancs.push({
+      competencia: STATE.competencia.mes+'/'+STATE.competencia.ano,
+      compSort: STATE.competencia.ano+'-'+String(MESES.indexOf(STATE.competencia.mes)+1).padStart(2,'0'),
+      laboratorio: l.laboratorio || (ex?ex.laboratorio:''),
+      convenioKey: l.convenio,
+      convenioLabel: tipo?tipo.label:l.convenio,
+      tipoProcesso: tipo?tipo.label:l.convenio,
+      vigencia: ex?ex.periodo:'',
+      exame: l.exameDescricao || (ex?ex.descricao:''),
+      quantidade: Number(l.quantidade)||0,
+      valorUnit: Number(l.valorUnit)||0,
+      valorTotal: Number(l.valorTotal)||0,
+      isCurrent: true
+    });
+  });
+  // Histórico fechado — usar porLaboratorio quando disponível
+  STATE.historico.forEach(h=>{
+    const compLabel = h.mes+'/'+h.ano;
+    const compSort = h.ano+'-'+String(MESES.indexOf(h.mes)+1).padStart(2,'0');
+    if(h.porLaboratorio && h.porLaboratorio.length>0){
+      h.porLaboratorio.forEach(pl=>{
+        const tipo = STATE.tiposConvenio.find(t=>t.cadastroValue===pl.convenio || t.key===pl.convenio);
+        allLancs.push({
+          competencia: compLabel, compSort,
+          laboratorio: pl.laboratorio||'',
+          convenioKey: tipo?tipo.key:(pl.convenio||''),
+          convenioLabel: tipo?tipo.label:(pl.convenio||''),
+          tipoProcesso: tipo?tipo.label:(pl.convenio||''),
+          vigencia: pl.periodo||'',
+          exame: pl.exame || pl.descricao || '',
+          quantidade: Number(pl.quantidade)||0,
+          valorUnit: Number(pl.valorUnit)||0,
+          valorTotal: Number(pl.valorTotal)||Number(pl.valor)||0,
+          isCurrent: false
+        });
+      });
+    } else {
+      // fallback para histórico antigo sem detalhamento
+      const pc = getPeriodoPorConvenio(h);
+      Object.entries(pc).forEach(([key, v])=>{
+        const tipo = STATE.tiposConvenio.find(t=>t.key===key);
+        if(v.valor>0 || v.qtd>0){
+          allLancs.push({
+            competencia: compLabel, compSort,
+            laboratorio: '', convenioKey: key, convenioLabel: tipo?tipo.label:key,
+            tipoProcesso: tipo?tipo.label:key, vigencia: '',
+            exame: '', quantidade: v.qtd, valorUnit: 0, valorTotal: v.valor, isCurrent: false
+          });
+        }
+      });
+    }
+  });
+  // Aplicar filtros
+  return allLancs.filter(d=>{
+    if(dashFiltroConvenio!=='Todos' && d.convenioLabel!==dashFiltroConvenio && d.convenioKey!==dashFiltroConvenio) return false;
+    if(dashFiltroLab!=='Todos' && d.laboratorio!==dashFiltroLab) return false;
+    if(dashFiltroVigencia!=='Todos' && d.vigencia!==dashFiltroVigencia) return false;
+    if(dashFiltroCompetencia!=='Consolidado' && d.competencia!==dashFiltroCompetencia) return false;
+    return true;
+  });
+}
+
+/* Opções únicas para os filtros, extraídas dos dados */
+function dashOpcoesFiltros(){
+  const allLancs = dashDadosFiltrados(); // sem filtros — usar todos
+  const todos = [];
+  STATE.lancamentos.forEach(l=>{
+    const ex = STATE.exames.find(e=>e.id===l.exameId);
+    const tipo = STATE.tiposConvenio.find(t=>t.key===l.convenio);
+    todos.push({
+      laboratorio: l.laboratorio||(ex?ex.laboratorio:''),
+      convenioLabel: tipo?tipo.label:l.convenio,
+      vigencia: ex?ex.periodo:'',
+      competencia: STATE.competencia.mes+'/'+STATE.competencia.ano
+    });
+  });
+  STATE.historico.forEach(h=>{
+    const cl = h.mes+'/'+h.ano;
+    if(h.porLaboratorio){
+      h.porLaboratorio.forEach(pl=>{
+        const tipo = STATE.tiposConvenio.find(t=>t.cadastroValue===pl.convenio||t.key===pl.convenio);
+        todos.push({ laboratorio: pl.laboratorio||'', convenioLabel: tipo?tipo.label:(pl.convenio||''), vigencia: pl.periodo||'', competencia: cl });
+      });
+    } else {
+      todos.push({ laboratorio:'', convenioLabel:'', vigencia:'', competencia: cl });
+    }
+  });
+  return {
+    convenios: [...new Set(todos.map(d=>d.convenioLabel).filter(Boolean))].sort(),
+    labs: [...new Set(todos.map(d=>d.laboratorio).filter(Boolean))].sort(),
+    vigencias: [...new Set(todos.map(d=>d.vigencia).filter(Boolean))].sort(),
+    competencias: [...new Set(todos.map(d=>d.competencia).filter(Boolean))].sort()
+  };
+}
+
+function dashGerarInsights(lancs){
+  const insights = [];
+  if(lancs.length===0) return [{tipo:'neutro',texto:'ℹ️ Nenhum dado encontrado para os filtros selecionados.'}];
+  const totalExames = lancs.reduce((s,d)=>s+d.quantidade,0);
+  const valorTotal = lancs.reduce((s,d)=>s+d.valorTotal,0);
+
+  // Evolução de volume
+  const porComp = {};
+  lancs.forEach(d=>{ if(!porComp[d.compSort]) porComp[d.compSort]={qtd:0,valor:0,label:d.competencia}; porComp[d.compSort].qtd+=d.quantidade; porComp[d.compSort].valor+=d.valorTotal; });
+  const comps = Object.keys(porComp).sort();
+  if(comps.length>=2){
+    const prim=porComp[comps[0]], ult=porComp[comps[comps.length-1]];
+    const vari = prim.qtd>0 ? ((ult.qtd-prim.qtd)/prim.qtd*100).toFixed(1) : 0;
+    if(vari>10) insights.push({tipo:'positivo',texto:'📈 Volume de exames cresceu '+vari+'% de '+prim.label+' para '+ult.label+'. Tendência de alta sustentada.'});
+    else if(vari<-10) insights.push({tipo:'alerta',texto:'📉 Volume de exames caiu '+Math.abs(vari)+'% de '+prim.label+' para '+ult.label+'. Investigar possíveis causas.'});
+    else insights.push({tipo:'neutro',texto:'ℹ️ Volume estável (variação de '+vari+'%) entre '+prim.label+' e '+ult.label+'.'});
+  }
+
+  // Concentração de processo
+  const porProc = {};
+  lancs.forEach(d=>{ porProc[d.tipoProcesso]=(porProc[d.tipoProcesso]||0)+d.valorTotal; });
+  const maiorProc = Object.entries(porProc).sort((a,b)=>b[1]-a[1])[0];
+  if(maiorProc && valorTotal>0){
+    const pct=((maiorProc[1]/valorTotal)*100).toFixed(1);
+    if(pct>70) insights.push({tipo:'neutro',texto:'ℹ️ "'+maiorProc[0]+'" concentra '+pct+'% do gasto total ('+fmtMoney(maiorProc[1])+').'});
+  }
+
+  // Ticket médio por lab
+  const porLab = {};
+  lancs.forEach(d=>{ if(!d.laboratorio) return; if(!porLab[d.laboratorio]) porLab[d.laboratorio]={v:0,q:0}; porLab[d.laboratorio].v+=d.valorTotal; porLab[d.laboratorio].q+=d.quantidade; });
+  const labArr = Object.entries(porLab).filter(([,v])=>v.q>0).map(([n,v])=>({nome:n,ticket:v.v/v.q})).sort((a,b)=>a.ticket-b.ticket);
+  if(labArr.length>=2){
+    const diff=((labArr[labArr.length-1].ticket-labArr[0].ticket)/labArr[0].ticket*100).toFixed(0);
+    if(diff>30) insights.push({tipo:'alerta',texto:'⚠️ Diferença de '+diff+'% no ticket médio entre laboratórios: '+labArr[0].nome+' ('+fmtMoney(labArr[0].ticket)+') vs '+labArr[labArr.length-1].nome+' ('+fmtMoney(labArr[labArr.length-1].ticket)+').'});
+  }
+
+  // Top exame
+  const porExame = {};
+  lancs.forEach(d=>{ if(d.exame) porExame[d.exame]=(porExame[d.exame]||0)+d.quantidade; });
+  const topEx = Object.entries(porExame).sort((a,b)=>b[1]-a[1])[0];
+  if(topEx && totalExames>0){
+    insights.push({tipo:'positivo',texto:'📈 Exame mais solicitado: '+topEx[0]+' com '+fmtNum(topEx[1])+' realizações ('+ ((topEx[1]/totalExames)*100).toFixed(1)+'% do total).'});
+  }
+
+  if(insights.length===0) insights.push({tipo:'neutro',texto:'ℹ️ Dados dentro dos parâmetros normais para o período analisado.'});
+  return insights;
+}
 function drawDashboardCharts(){
+  const lancs = dashDadosFiltrados();
+  // Destruir todos os gráficos anteriores
+  [chartConvRef,chartEvoRef,chartLabValRef,chartLabTickRef,chartPieRef].forEach(c=>{if(c)c.destroy();});
+  chartConvRef=chartEvoRef=chartLabValRef=chartLabTickRef=chartPieRef=null;
+
+  // ── Gráfico 1: Por convênio ──
   const c1 = document.getElementById('chartConv');
+  if(c1){
+    const agr = {};
+    lancs.forEach(d=>{ agr[d.tipoProcesso]=(agr[d.tipoProcesso]||0)+d.valorTotal; });
+    const labels = Object.keys(agr);
+    const data = Object.values(agr).map(v=>Math.round(v*100)/100);
+    const colors = labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]);
+    chartConvRef = new Chart(c1, {
+      type:'bar',
+      data:{ labels, datasets:[{ data, backgroundColor:colors, borderRadius:6, maxBarThickness:56 }]},
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtMoney(c.raw)}}}, scales:{ y:{beginAtZero:true, ticks:{callback:v=>fmtMoney(v)}} } }
+    });
+  }
+
+  // ── Gráfico 2: Evolução temporal ──
   const c2 = document.getElementById('chartEvo');
-  if(!c1||!c2) return;
-  const periods = allPeriodsData();
-  const tipos = STATE.tiposConvenio;
-  const labels = tipos.map(t=>t.label);
-  const data = tipos.map(t=>totalTipoAcrossPeriods(periods, t.key, 'valor'));
-  const colors = tipos.map((t,i)=>colorForTipoIndex(i));
-  if(chartConvRef) chartConvRef.destroy();
-  chartConvRef = new Chart(c1, {
-    type:'bar',
-    data:{ labels, datasets:[{ data, backgroundColor:colors, borderRadius:6 }]},
-    options:{ plugins:{legend:{display:false}}, scales:{ y:{ticks:{callback:v=>fmtMoney(v)}} } }
-  });
-  if(chartEvoRef) chartEvoRef.destroy();
-  chartEvoRef = new Chart(c2, {
-    type:'line',
-    data:{ labels: periods.map(p=>p.mes.slice(0,3)+'/'+String(p.ano).slice(2)),
-      datasets:[{ label:'Valor total', data: periods.map(p=>p.valorTotal), borderColor:'#0E6E6E', backgroundColor:'rgba(14,110,110,.12)', fill:true, tension:.3 }]},
-    options:{ plugins:{legend:{display:false}}, scales:{ y:{ticks:{callback:v=>fmtMoney(v)}} } }
-  });
+  if(c2){
+    const agr = {};
+    lancs.forEach(d=>{ if(!agr[d.compSort]) agr[d.compSort]={v:0,q:0,label:d.competencia}; agr[d.compSort].v+=d.valorTotal; agr[d.compSort].q+=d.quantidade; });
+    const sorted = Object.entries(agr).sort(([a],[b])=>a.localeCompare(b));
+    if(sorted.length>0){
+      chartEvoRef = new Chart(c2, {
+        type:'line',
+        data:{ labels: sorted.map(([,v])=>v.label),
+          datasets:[
+            { label:'Valor (R$)', data: sorted.map(([,v])=>Math.round(v.v*100)/100), borderColor:'#0E6E6E', backgroundColor:'rgba(14,110,110,.1)', fill:true, tension:.3, pointRadius:4, pointBackgroundColor:'#0E6E6E', yAxisID:'y' },
+            { label:'Quantidade', data: sorted.map(([,v])=>v.q), borderColor:'#D98A3D', backgroundColor:'rgba(217,138,61,.1)', fill:true, tension:.3, pointRadius:4, pointBackgroundColor:'#D98A3D', yAxisID:'y1' }
+          ]},
+        options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+          plugins:{ tooltip:{callbacks:{label:c=>c.dataset.label.includes('Valor')?fmtMoney(c.raw):fmtNum(c.raw)+' exames'}} },
+          scales:{ y:{type:'linear',position:'left',beginAtZero:true,ticks:{callback:v=>fmtMoney(v)}}, y1:{type:'linear',position:'right',beginAtZero:true,grid:{drawOnChartArea:false}} }
+        }
+      });
+    }
+  }
+
+  // ── Gráfico 3: Comparativo Labs ──
+  const c3 = document.getElementById('chartLabVal');
+  const c4 = document.getElementById('chartLabTick');
+  if(c3){
+    const agr = {};
+    lancs.forEach(d=>{ if(!d.laboratorio) return; if(!agr[d.laboratorio]) agr[d.laboratorio]={v:0,q:0}; agr[d.laboratorio].v+=d.valorTotal; agr[d.laboratorio].q+=d.quantidade; });
+    const labels = Object.keys(agr);
+    if(labels.length>0){
+      chartLabValRef = new Chart(c3, {
+        type:'bar',
+        data:{ labels, datasets:[
+          { label:'Valor (R$)', data:labels.map(l=>Math.round(agr[l].v*100)/100), backgroundColor:'#0E6E6E', borderRadius:4, maxBarThickness:36, yAxisID:'y' },
+          { label:'Quantidade', data:labels.map(l=>agr[l].q), backgroundColor:'#5B3FA3', borderRadius:4, maxBarThickness:36, yAxisID:'y1' }
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ tooltip:{callbacks:{label:c=>c.dataset.label.includes('Valor')?fmtMoney(c.raw):fmtNum(c.raw)}} },
+          scales:{ y:{position:'left',beginAtZero:true,ticks:{callback:v=>fmtMoney(v)}}, y1:{position:'right',beginAtZero:true,grid:{drawOnChartArea:false}} }
+        }
+      });
+      if(c4){
+        const tickets = labels.map(l=>agr[l].q>0?Math.round((agr[l].v/agr[l].q)*100)/100:0);
+        chartLabTickRef = new Chart(c4, {
+          type:'bar',
+          data:{ labels, datasets:[{ label:'Ticket Médio', data:tickets, backgroundColor:labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]), borderRadius:6, maxBarThickness:56 }] },
+          options:{ responsive:true, maintainAspectRatio:false, indexAxis:'y', plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtMoney(c.raw)}}}, scales:{ x:{beginAtZero:true,ticks:{callback:v=>fmtMoney(v)}} } }
+        });
+      }
+    }
+  }
+
+  // ── Gráfico 4: Distribuição (pizza) ──
+  const c5 = document.getElementById('chartPie');
+  if(c5){
+    const agr = {};
+    lancs.forEach(d=>{ agr[d.tipoProcesso]=(agr[d.tipoProcesso]||0)+d.valorTotal; });
+    const labels = Object.keys(agr);
+    const data = Object.values(agr).map(v=>Math.round(v*100)/100);
+    const total = data.reduce((s,v)=>s+v,0);
+    if(labels.length>0){
+      chartPieRef = new Chart(c5, {
+        type:'doughnut',
+        data:{ labels, datasets:[{ data, backgroundColor:labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]), borderWidth:2, borderColor:'#fff', hoverOffset:8 }] },
+        options:{ responsive:true, maintainAspectRatio:false, cutout:'55%', plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>fmtMoney(c.raw)+' ('+((c.raw/total)*100).toFixed(1)+'%)'}} } }
+      });
+      const leg = document.getElementById('pieLegenda');
+      if(leg) leg.innerHTML = labels.map((l,i)=>{
+        const pct = total>0?((data[i]/total)*100).toFixed(1):0;
+        return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><div style="width:14px;height:14px;border-radius:4px;background:${CHART_COLORS[i%CHART_COLORS.length]};flex-shrink:0;"></div><div><div style="font-size:13px;font-weight:700;color:var(--ink);">${esc(l)}</div><div style="font-size:12px;color:var(--ink-soft);">${fmtMoney(data[i])} (${pct}%)</div></div></div>`;
+      }).join('');
+    }
+  }
 }
 
 /* ============================================================
@@ -1348,7 +1780,17 @@ function labNaturezaBadge(natureza){
 }
 function viewLabs(){
   const editing = editingLabId ? STATE.labs.find(l=>l.id===editingLabId) : null;
+  const totalLabs = STATE.labs.length;
+  const ativos = STATE.labs.filter(l=>l.tipo==='ATIVO').length;
+  const publicos = STATE.labs.filter(l=>l.natureza==='PUBLICO').length;
+  const terceir = STATE.labs.filter(l=>l.natureza==='TERCEIRIZADO').length;
   return `
+    <div class="grid cols-4" style="margin-bottom:16px;">
+      <div class="stat"><div class="label">Total cadastrados</div><div class="value">${totalLabs}</div></div>
+      <div class="stat"><div class="label">Ativos</div><div class="value" style="color:var(--green);">${ativos}</div></div>
+      <div class="stat"><div class="label">Principal (Público)</div><div class="value" style="color:var(--teal);">${publicos}</div></div>
+      <div class="stat"><div class="label">Terceirizados</div><div class="value" style="color:var(--amber);">${terceir}</div></div>
+    </div>
     <div class="card edit-only">
       <h2>${editing ? '✏️ Editar laboratório' : 'Novo laboratório'}</h2>
       <div class="subtitle">${editing ? 'Altere os dados e clique em salvar. Isso não afeta exames ou lançamentos já vinculados a este laboratório.' : 'Preencha os dados e clique em adicionar'}</div>
@@ -1416,10 +1858,10 @@ function saveLab(){
     if(!lab){ editingLabId=null; render(); return; }
     Object.assign(lab, dados);
     editingLabId = null;
-    saveState(); render(); showToast('Laboratório atualizado. Exames e lançamentos já cadastrados continuam vinculados normalmente.');
+    saveState(); render(); showToast('Laboratório atualizado.','success') Exames e lançamentos já cadastrados continuam vinculados normalmente.');
   } else {
     STATE.labs.push({ id: uid(), ...dados });
-    saveState(); render(); showToast('Laboratório adicionado.');
+    saveState(); render(); showToast('Laboratório adicionado.','success');
   }
 }
 function editLab(id){
@@ -2051,7 +2493,7 @@ function addLancamento(){
     valorTotal: qtd*exame.valorUnit,
     competencia: STATE.competencia.mes, ano: STATE.competencia.ano,
   });
-  saveState(); render(); showToast('Exame lançado com sucesso.');
+  saveState(); render(); showToast('Exame lançado com sucesso.','success');
 }
 function deleteLancamento(id){
   if(semPermissao('lancamento')) return;
@@ -3269,14 +3711,14 @@ async function saveUsuario(){
     u.perfil = perfil;
     u.master = (perfil==='master'); // mantido só por compatibilidade com versões antigas
     editingUsuarioId = null;
-    saveUsersState(true); render(); showToast('Usuário atualizado.');
+    saveUsersState(true); render(); showToast('Usuário atualizado.','success');
   } else {
     if(!usuarioRaw || usuarioRaw.length<3){ showToast('Informe um usuário (login) com pelo menos 3 caracteres.'); return; }
     if(!senha || senha.length<4){ showToast('Informe uma senha com pelo menos 4 caracteres.'); return; }
     if(USERS_STATE.usuarios.some(u=>u.usuario===usuarioRaw)){ showToast('Já existe um usuário com esse login.'); return; }
     const senhaHash = await hashSenha(senha);
     USERS_STATE.usuarios.push({ id: uid(), usuario:usuarioRaw, nome, email, perfil, master:(perfil==='master'), senhaHash, bloqueado:false, criadoEm:new Date().toISOString() });
-    saveUsersState(true); render(); showToast('Usuário adicionado.');
+    saveUsersState(true); render(); showToast('Usuário adicionado.','success');
   }
 }
 function editUsuario(id){
@@ -3301,7 +3743,7 @@ function desbloquearUsuario(id){
   if(!u) return;
   u.bloqueado = false;
   limparTentativasLogin(u.usuario);
-  saveUsersState(true); render(); showToast('Usuário desbloqueado.');
+  saveUsersState(true); render(); showToast('Usuário desbloqueado.','success');
 }
 function removerSolicitacaoSenha(id){
   if(!Array.isArray(USERS_STATE.solicitacoesSenha)) return;
@@ -3367,6 +3809,33 @@ async function iniciarComLogin(){
   document.getElementById('loginScreen').style.display = 'flex';
 }
 
+/* ============================================================
+   ATALHOS DE TECLADO
+   Alt+1..Alt+9 — navega pelos módulos na ordem do menu
+   Alt+D — Dashboard · Alt+L — Lançar Exames · Alt+F — Emissão NF
+   Alt+R — Relatórios · Esc — fechar sidebar no mobile
+   ============================================================ */
+const ATALHOS_MODULO = {
+  '1':'dashboard','2':'labs','3':'exames','4':'tiposConvenio',
+  '5':'comparativo','6':'lancamento','7':'nf','8':'relatorios',
+  'd':'dashboard','l':'lancamento','f':'nf','r':'relatorios','u':'usuarios'
+};
+document.addEventListener('keydown', function(e){
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||e.target.tagName==='TEXTAREA') return;
+  if(e.altKey && ATALHOS_MODULO[e.key]){
+    e.preventDefault();
+    const mod = ATALHOS_MODULO[e.key];
+    if((mod==='usuarios'||mod==='logAcesso') && !isMaster()) return;
+    goto(mod);
+  }
+  if(e.key==='Escape'){
+    toggleSidebarMobile(true);
+  }
+});
+
+/* ============================================================
+   LOADING SCREEN MELHORADO
+   ============================================================ */
 (function init(){
   if(!firebaseOk){
     document.getElementById('loadingScreen').style.display = 'none';
