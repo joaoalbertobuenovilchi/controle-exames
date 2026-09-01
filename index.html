@@ -1455,6 +1455,8 @@ function viewDashboard(){
         <div class="dash-chart-tabs">
           <button class="dash-chart-tab ${dashChartTab==='convenio'?'active':''}" onclick="dashMudarAba('convenio')">Por Convênio</button>
           <button class="dash-chart-tab ${dashChartTab==='evolucao'?'active':''}" onclick="dashMudarAba('evolucao')">Evolução Temporal</button>
+          <button class="dash-chart-tab ${dashChartTab==='compConvenio'?'active':''}" onclick="dashMudarAba('compConvenio')">Competências × Convênio</button>
+          <button class="dash-chart-tab ${dashChartTab==='topExames'?'active':''}" onclick="dashMudarAba('topExames')">Top Exames por Período</button>
           <button class="dash-chart-tab ${dashChartTab==='laboratorio'?'active':''}" onclick="dashMudarAba('laboratorio')">Comparativo Labs</button>
           <button class="dash-chart-tab ${dashChartTab==='distribuicao'?'active':''}" onclick="dashMudarAba('distribuicao')">Distribuição</button>
         </div>
@@ -1475,6 +1477,20 @@ function viewDashboard(){
             <div><div class="subtitle" style="font-weight:700;color:var(--ink);margin-bottom:6px;">Valor total e quantidade</div><div class="chartbox"><canvas id="chartLabVal"></canvas></div></div>
             <div><div class="subtitle" style="font-weight:700;color:var(--ink);margin-bottom:6px;">Ticket médio por laboratório</div><div class="chartbox"><canvas id="chartLabTick"></canvas></div></div>
           </div>
+        </div>
+        <div class="dash-chart-panel ${dashChartTab==='compConvenio'?'active':''}">
+          <h2>Comparativo entre competências por tipo de convênio/processo</h2>
+          <div class="subtitle">Evolução do valor de cada tipo de convênio/processo ao longo das competências fechadas</div>
+          <div class="chartbox" style="height:320px;"><canvas id="chartCompConv"></canvas></div>
+          <div style="margin-top:16px;">
+            <div class="subtitle" style="font-weight:700;color:var(--ink);margin-bottom:6px;">Quantidade de exames por competência e convênio</div>
+            <div class="chartbox" style="height:280px;"><canvas id="chartCompConvQtd"></canvas></div>
+          </div>
+        </div>
+        <div class="dash-chart-panel ${dashChartTab==='topExames'?'active':''}">
+          <h2>Exames mais solicitados por competência</h2>
+          <div class="subtitle">Top 5 exames com maior quantidade de realizações em cada período</div>
+          <div id="topExamesPorPeriodo"></div>
         </div>
         <div class="dash-chart-panel ${dashChartTab==='distribuicao'?'active':''}">
           <h2>Distribuição por tipo de processo</h2>
@@ -1676,92 +1692,208 @@ function drawDashboardCharts(){
   [chartConvRef,chartEvoRef,chartLabValRef,chartLabTickRef,chartPieRef].forEach(c=>{if(c)c.destroy();});
   chartConvRef=chartEvoRef=chartLabValRef=chartLabTickRef=chartPieRef=null;
 
-  // ── Gráfico 1: Por convênio ──
-  const c1 = document.getElementById('chartConv');
-  if(c1){
-    const agr = {};
-    lancs.forEach(d=>{ agr[d.tipoProcesso]=(agr[d.tipoProcesso]||0)+d.valorTotal; });
-    const labels = Object.keys(agr);
-    const data = Object.values(agr).map(v=>Math.round(v*100)/100);
-    const colors = labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]);
-    chartConvRef = new Chart(c1, {
-      type:'bar',
-      data:{ labels, datasets:[{ data, backgroundColor:colors, borderRadius:6, maxBarThickness:56 }]},
-      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtMoney(c.raw)}}}, scales:{ y:{beginAtZero:true, ticks:{callback:v=>fmtMoney(v)}} } }
-    });
-  }
-
-  // ── Gráfico 2: Evolução temporal ──
-  const c2 = document.getElementById('chartEvo');
-  if(c2){
-    const agr = {};
-    lancs.forEach(d=>{ if(!agr[d.compSort]) agr[d.compSort]={v:0,q:0,label:d.competencia}; agr[d.compSort].v+=d.valorTotal; agr[d.compSort].q+=d.quantidade; });
-    const sorted = Object.entries(agr).sort(([a],[b])=>a.localeCompare(b));
-    if(sorted.length>0){
-      chartEvoRef = new Chart(c2, {
-        type:'line',
-        data:{ labels: sorted.map(([,v])=>v.label),
-          datasets:[
-            { label:'Valor (R$)', data: sorted.map(([,v])=>Math.round(v.v*100)/100), borderColor:'#0E6E6E', backgroundColor:'rgba(14,110,110,.1)', fill:true, tension:.3, pointRadius:4, pointBackgroundColor:'#0E6E6E', yAxisID:'y' },
-            { label:'Quantidade', data: sorted.map(([,v])=>v.q), borderColor:'#D98A3D', backgroundColor:'rgba(217,138,61,.1)', fill:true, tension:.3, pointRadius:4, pointBackgroundColor:'#D98A3D', yAxisID:'y1' }
-          ]},
-        options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
-          plugins:{ tooltip:{callbacks:{label:c=>c.dataset.label.includes('Valor')?fmtMoney(c.raw):fmtNum(c.raw)+' exames'}} },
-          scales:{ y:{type:'linear',position:'left',beginAtZero:true,ticks:{callback:v=>fmtMoney(v)}}, y1:{type:'linear',position:'right',beginAtZero:true,grid:{drawOnChartArea:false}} }
-        }
-      });
-    }
-  }
-
-  // ── Gráfico 3: Comparativo Labs ──
-  const c3 = document.getElementById('chartLabVal');
-  const c4 = document.getElementById('chartLabTick');
-  if(c3){
-    const agr = {};
-    lancs.forEach(d=>{ if(!d.laboratorio) return; if(!agr[d.laboratorio]) agr[d.laboratorio]={v:0,q:0}; agr[d.laboratorio].v+=d.valorTotal; agr[d.laboratorio].q+=d.quantidade; });
-    const labels = Object.keys(agr);
-    if(labels.length>0){
-      chartLabValRef = new Chart(c3, {
-        type:'bar',
-        data:{ labels, datasets:[
-          { label:'Valor (R$)', data:labels.map(l=>Math.round(agr[l].v*100)/100), backgroundColor:'#0E6E6E', borderRadius:4, maxBarThickness:36, yAxisID:'y' },
-          { label:'Quantidade', data:labels.map(l=>agr[l].q), backgroundColor:'#5B3FA3', borderRadius:4, maxBarThickness:36, yAxisID:'y1' }
-        ]},
-        options:{ responsive:true, maintainAspectRatio:false,
-          plugins:{ tooltip:{callbacks:{label:c=>c.dataset.label.includes('Valor')?fmtMoney(c.raw):fmtNum(c.raw)}} },
-          scales:{ y:{position:'left',beginAtZero:true,ticks:{callback:v=>fmtMoney(v)}}, y1:{position:'right',beginAtZero:true,grid:{drawOnChartArea:false}} }
-        }
-      });
-      if(c4){
-        const tickets = labels.map(l=>agr[l].q>0?Math.round((agr[l].v/agr[l].q)*100)/100:0);
-        chartLabTickRef = new Chart(c4, {
+  // ── Gráfico 1: Por convênio (só renderiza se a aba estiver ativa) ──
+  if(dashChartTab==='convenio'){
+    const c1 = document.getElementById('chartConv');
+    if(c1){
+      const agr = {};
+      lancs.forEach(d=>{ const k=d.tipoProcesso||d.convenioLabel||'Outro'; agr[k]=(agr[k]||0)+d.valorTotal; });
+      const labels = Object.keys(agr);
+      const data = Object.values(agr).map(v=>Math.round(v*100)/100);
+      const colors = labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]);
+      if(labels.length>0){
+        chartConvRef = new Chart(c1, {
           type:'bar',
-          data:{ labels, datasets:[{ label:'Ticket Médio', data:tickets, backgroundColor:labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]), borderRadius:6, maxBarThickness:56 }] },
-          options:{ responsive:true, maintainAspectRatio:false, indexAxis:'y', plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtMoney(c.raw)}}}, scales:{ x:{beginAtZero:true,ticks:{callback:v=>fmtMoney(v)}} } }
+          data:{ labels, datasets:[{ data, backgroundColor:colors, borderRadius:6, maxBarThickness:56 }]},
+          options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtMoney(c.raw)}}}, scales:{ y:{beginAtZero:true, ticks:{callback:v=>fmtMoney(v)}} } }
         });
       }
     }
   }
 
+  // ── Gráfico 2: Evolução temporal ──
+  if(dashChartTab==='evolucao'){
+    const c2 = document.getElementById('chartEvo');
+    if(c2){
+      const agr = {};
+      lancs.forEach(d=>{ if(!agr[d.compSort]) agr[d.compSort]={v:0,q:0,label:d.competencia}; agr[d.compSort].v+=d.valorTotal; agr[d.compSort].q+=d.quantidade; });
+      const sorted = Object.entries(agr).sort(([a],[b])=>a.localeCompare(b));
+      if(sorted.length>0){
+        chartEvoRef = new Chart(c2, {
+          type:'line',
+          data:{ labels: sorted.map(([,v])=>v.label),
+            datasets:[
+              { label:'Valor (R$)', data: sorted.map(([,v])=>Math.round(v.v*100)/100), borderColor:'#0E6E6E', backgroundColor:'rgba(14,110,110,.1)', fill:true, tension:.3, pointRadius:4, pointBackgroundColor:'#0E6E6E', yAxisID:'y' },
+              { label:'Quantidade', data: sorted.map(([,v])=>v.q), borderColor:'#D98A3D', backgroundColor:'rgba(217,138,61,.1)', fill:true, tension:.3, pointRadius:4, pointBackgroundColor:'#D98A3D', yAxisID:'y1' }
+            ]},
+          options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+            plugins:{ tooltip:{callbacks:{label:c=>c.dataset.label.includes('Valor')?fmtMoney(c.raw):fmtNum(c.raw)+' exames'}} },
+            scales:{ y:{type:'linear',position:'left',beginAtZero:true,ticks:{callback:v=>fmtMoney(v)}}, y1:{type:'linear',position:'right',beginAtZero:true,grid:{drawOnChartArea:false}} }
+          }
+        });
+      }
+    }
+  }
+
+  // ── Gráfico 3: Comparativo Labs ──
+  if(dashChartTab==='laboratorio'){
+    const c3 = document.getElementById('chartLabVal');
+    const c4 = document.getElementById('chartLabTick');
+    if(c3){
+      const agr = {};
+      lancs.forEach(d=>{ if(!d.laboratorio) return; if(!agr[d.laboratorio]) agr[d.laboratorio]={v:0,q:0}; agr[d.laboratorio].v+=d.valorTotal; agr[d.laboratorio].q+=d.quantidade; });
+      const labels = Object.keys(agr);
+      if(labels.length>0){
+        chartLabValRef = new Chart(c3, {
+          type:'bar',
+          data:{ labels, datasets:[
+            { label:'Valor (R$)', data:labels.map(l=>Math.round(agr[l].v*100)/100), backgroundColor:'#0E6E6E', borderRadius:4, maxBarThickness:36, yAxisID:'y' },
+            { label:'Quantidade', data:labels.map(l=>agr[l].q), backgroundColor:'#5B3FA3', borderRadius:4, maxBarThickness:36, yAxisID:'y1' }
+          ]},
+          options:{ responsive:true, maintainAspectRatio:false,
+            plugins:{ tooltip:{callbacks:{label:c=>c.dataset.label.includes('Valor')?fmtMoney(c.raw):fmtNum(c.raw)}} },
+            scales:{ y:{position:'left',beginAtZero:true,ticks:{callback:v=>fmtMoney(v)}}, y1:{position:'right',beginAtZero:true,grid:{drawOnChartArea:false}} }
+          }
+        });
+        if(c4){
+          const tickets = labels.map(l=>agr[l].q>0?Math.round((agr[l].v/agr[l].q)*100)/100:0);
+          chartLabTickRef = new Chart(c4, {
+            type:'bar',
+            data:{ labels, datasets:[{ label:'Ticket Médio', data:tickets, backgroundColor:labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]), borderRadius:6, maxBarThickness:56 }] },
+            options:{ responsive:true, maintainAspectRatio:false, indexAxis:'y', plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtMoney(c.raw)}}}, scales:{ x:{beginAtZero:true,ticks:{callback:v=>fmtMoney(v)}} } }
+          });
+        }
+      }
+    }
+  }
+
   // ── Gráfico 4: Distribuição (pizza) ──
-  const c5 = document.getElementById('chartPie');
-  if(c5){
-    const agr = {};
-    lancs.forEach(d=>{ agr[d.tipoProcesso]=(agr[d.tipoProcesso]||0)+d.valorTotal; });
-    const labels = Object.keys(agr);
-    const data = Object.values(agr).map(v=>Math.round(v*100)/100);
-    const total = data.reduce((s,v)=>s+v,0);
-    if(labels.length>0){
-      chartPieRef = new Chart(c5, {
-        type:'doughnut',
-        data:{ labels, datasets:[{ data, backgroundColor:labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]), borderWidth:2, borderColor:'#fff', hoverOffset:8 }] },
-        options:{ responsive:true, maintainAspectRatio:false, cutout:'55%', plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>fmtMoney(c.raw)+' ('+((c.raw/total)*100).toFixed(1)+'%)'}} } }
+  if(dashChartTab==='distribuicao'){
+    const c5 = document.getElementById('chartPie');
+    if(c5){
+      const agr = {};
+      lancs.forEach(d=>{ const k=d.tipoProcesso||d.convenioLabel||'Outro'; agr[k]=(agr[k]||0)+d.valorTotal; });
+      const labels = Object.keys(agr);
+      const data = Object.values(agr).map(v=>Math.round(v*100)/100);
+      const total = data.reduce((s,v)=>s+v,0);
+      if(labels.length>0){
+        chartPieRef = new Chart(c5, {
+          type:'doughnut',
+          data:{ labels, datasets:[{ data, backgroundColor:labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]), borderWidth:2, borderColor:'#fff', hoverOffset:8 }] },
+          options:{ responsive:true, maintainAspectRatio:false, cutout:'55%', plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>fmtMoney(c.raw)+' ('+((c.raw/total)*100).toFixed(1)+'%)'}} } }
+        });
+        const leg = document.getElementById('pieLegenda');
+        if(leg) leg.innerHTML = labels.map((l,i)=>{
+          const pct = total>0?((data[i]/total)*100).toFixed(1):0;
+          return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><div style="width:14px;height:14px;border-radius:4px;background:${CHART_COLORS[i%CHART_COLORS.length]};flex-shrink:0;"></div><div><div style="font-size:13px;font-weight:700;color:var(--ink);">${esc(l)}</div><div style="font-size:12px;color:var(--ink-soft);">${fmtMoney(data[i])} (${pct}%)</div></div></div>`;
+        }).join('');
+      }
+    }
+  }
+
+  // ── Gráfico 5: Comparativo Competências × Convênio (barras agrupadas) ──
+  if(dashChartTab==='compConvenio'){
+    const c6 = document.getElementById('chartCompConv');
+    const c7 = document.getElementById('chartCompConvQtd');
+    if(c6){
+      // Agrupar por competência e tipo de convênio
+      const agr = {}; // { compSort: { label, tipos: { tipoLabel: {valor, qtd} } } }
+      lancs.forEach(d=>{
+        if(!agr[d.compSort]) agr[d.compSort] = { label: d.competencia, tipos: {} };
+        const k = d.tipoProcesso || d.convenioLabel || 'Outro';
+        if(!agr[d.compSort].tipos[k]) agr[d.compSort].tipos[k] = { valor:0, qtd:0 };
+        agr[d.compSort].tipos[k].valor += d.valorTotal;
+        agr[d.compSort].tipos[k].qtd += d.quantidade;
       });
-      const leg = document.getElementById('pieLegenda');
-      if(leg) leg.innerHTML = labels.map((l,i)=>{
-        const pct = total>0?((data[i]/total)*100).toFixed(1):0;
-        return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><div style="width:14px;height:14px;border-radius:4px;background:${CHART_COLORS[i%CHART_COLORS.length]};flex-shrink:0;"></div><div><div style="font-size:13px;font-weight:700;color:var(--ink);">${esc(l)}</div><div style="font-size:12px;color:var(--ink-soft);">${fmtMoney(data[i])} (${pct}%)</div></div></div>`;
-      }).join('');
+      const compsSorted = Object.entries(agr).sort(([a],[b])=>a.localeCompare(b));
+      const compLabels = compsSorted.map(([,v])=>v.label);
+      // Coletar todos os tipos de convênio únicos
+      const todosConvTipos = [...new Set(lancs.map(d=>d.tipoProcesso||d.convenioLabel||'Outro'))];
+      if(compLabels.length>0 && todosConvTipos.length>0){
+        // Datasets de VALOR
+        const datasetsValor = todosConvTipos.map((tipo,i)=>({
+          label: tipo,
+          data: compsSorted.map(([,v])=> Math.round(((v.tipos[tipo]||{}).valor||0)*100)/100),
+          backgroundColor: CHART_COLORS[i%CHART_COLORS.length],
+          borderRadius: 4, maxBarThickness: 40
+        }));
+        chartConvRef = new Chart(c6, {
+          type:'bar',
+          data:{ labels: compLabels, datasets: datasetsValor },
+          options:{ responsive:true, maintainAspectRatio:false,
+            plugins:{ legend:{position:'bottom',labels:{font:{size:11}}}, tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtMoney(c.raw)}} },
+            scales:{ y:{beginAtZero:true,ticks:{callback:v=>fmtMoney(v)}}, x:{ticks:{font:{size:11}}} }
+          }
+        });
+        // Datasets de QUANTIDADE
+        if(c7){
+          const datasetsQtd = todosConvTipos.map((tipo,i)=>({
+            label: tipo,
+            data: compsSorted.map(([,v])=> (v.tipos[tipo]||{}).qtd||0),
+            backgroundColor: CHART_COLORS[i%CHART_COLORS.length]+'cc',
+            borderRadius: 4, maxBarThickness: 40
+          }));
+          chartEvoRef = new Chart(c7, {
+            type:'bar',
+            data:{ labels: compLabels, datasets: datasetsQtd },
+            options:{ responsive:true, maintainAspectRatio:false,
+              plugins:{ legend:{position:'bottom',labels:{font:{size:11}}}, tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtNum(c.raw)+' exames'}} },
+              scales:{ y:{beginAtZero:true}, x:{ticks:{font:{size:11}}} }
+            }
+          });
+        }
+      }
+    }
+  }
+
+  // ── Gráfico 6: Top Exames por Período (tabela dinâmica) ──
+  if(dashChartTab==='topExames'){
+    const container = document.getElementById('topExamesPorPeriodo');
+    if(container){
+      // Agrupar por competência
+      const porComp = {};
+      lancs.forEach(d=>{
+        if(!d.exame) return;
+        if(!porComp[d.compSort]) porComp[d.compSort] = { label: d.competencia, exames: {} };
+        if(!porComp[d.compSort].exames[d.exame]) porComp[d.compSort].exames[d.exame] = { qtd:0, valor:0 };
+        porComp[d.compSort].exames[d.exame].qtd += d.quantidade;
+        porComp[d.compSort].exames[d.exame].valor += d.valorTotal;
+      });
+      const compsSorted = Object.entries(porComp).sort(([a],[b])=>a.localeCompare(b));
+      if(compsSorted.length===0){
+        container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--ink-soft);">Sem dados para exibir.</div>';
+      } else {
+        let html = '';
+        compsSorted.forEach(([,comp])=>{
+          const top5 = Object.entries(comp.exames)
+            .sort(([,a],[,b])=>b.qtd-a.qtd)
+            .slice(0,5);
+          const totalComp = Object.values(comp.exames).reduce((s,e)=>s+e.qtd,0);
+          html += `
+            <div style="margin-bottom:18px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span style="background:var(--teal);color:#fff;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;">${esc(comp.label)}</span>
+                <span style="font-size:12px;color:var(--ink-soft);">${fmtNum(totalComp)} exames no total</span>
+              </div>
+              <div class="table-wrap" style="max-height:none;"><table class="dash-ranking">
+                <thead><tr><th style="width:30px;">#</th><th>Exame</th><th class="right">Quantidade</th><th class="right">Valor Total</th><th class="right">% do Período</th></tr></thead>
+                <tbody>
+                  ${top5.map(([nome,v],i)=>{
+                    const pct = totalComp>0 ? ((v.qtd/totalComp)*100).toFixed(1) : 0;
+                    return `<tr>
+                      <td style="color:var(--ink-soft);font-weight:700;font-size:11px;">${i+1}</td>
+                      <td><b>${esc(nome)}</b></td>
+                      <td class="right">${fmtNum(v.qtd)}</td>
+                      <td class="right" style="color:var(--teal-dark);font-weight:700;">${fmtMoney(v.valor)}</td>
+                      <td class="right"><span class="pct-badge">${pct}%</span></td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table></div>
+            </div>`;
+        });
+        container.innerHTML = html;
+      }
     }
   }
 }
