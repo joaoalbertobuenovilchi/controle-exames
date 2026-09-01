@@ -859,7 +859,7 @@ let saving = false;
 function saveState(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
-    if(!firebaseOk){ showToast('Backend não configurado.','warning') Veja INSTRUCOES_BACKEND.md.'); return; }
+    if(!firebaseOk){ showToast('Backend não configurado. Veja INSTRUCOES_BACKEND.md.','warning'); return; }
     const code = getAccessCode();
     if(!code) return;
     saving = true;
@@ -1858,7 +1858,7 @@ function saveLab(){
     if(!lab){ editingLabId=null; render(); return; }
     Object.assign(lab, dados);
     editingLabId = null;
-    saveState(); render(); showToast('Laboratório atualizado.','success') Exames e lançamentos já cadastrados continuam vinculados normalmente.');
+    saveState(); render(); showToast('Laboratório atualizado. Exames e lançamentos já cadastrados continuam vinculados normalmente.','success');
   } else {
     STATE.labs.push({ id: uid(), ...dados });
     saveState(); render(); showToast('Laboratório adicionado.','success');
