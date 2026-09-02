@@ -1450,10 +1450,18 @@ function viewDashboard(){
         ${insightsHTML}
       </div>
 
-      <!-- Gráficos (sempre visíveis, sem abas) -->
+      <!-- Gráficos em HTML puro (sem Chart.js) -->
       <div class="grid cols-2" style="margin-top:16px;">
-        <div class="card"><h2>Valor total por tipo de convênio</h2><div class="subtitle">Comparativo entre os tipos de convênio/processo cadastrados</div><div class="chartbox"><canvas id="chartConv"></canvas></div></div>
-        <div class="card"><h2>Evolução do valor total por período</h2><div class="subtitle">Cada competência fechada + a competência atual</div><div class="chartbox"><canvas id="chartEvo"></canvas></div></div>
+        <div class="card">
+          <h2>Valor total por tipo de convênio</h2>
+          <div class="subtitle">Comparativo entre os tipos de convênio/processo cadastrados</div>
+          ${dashBarrasConvenio(lancs)}
+        </div>
+        <div class="card">
+          <h2>Evolução do valor total por período</h2>
+          <div class="subtitle">Cada competência fechada + a competência atual</div>
+          ${dashBarrasEvolucao(lancs)}
+        </div>
       </div>
 
       <!-- Top Exames por Período -->
@@ -1648,43 +1656,67 @@ function dashGerarInsights(lancs){
   return insights;
 }
 function drawDashboardCharts(){
-  setTimeout(function(){
-    const lancs = dashDadosFiltrados();
-    [chartConvRef,chartEvoRef].forEach(c=>{if(c)try{c.destroy();}catch(e){}});
-    chartConvRef=chartEvoRef=null;
+  // Gráficos agora são renderizados em HTML puro dentro de viewDashboard()
+  // Esta função é mantida apenas por compatibilidade com afterRender()
+}
 
-    // Gráfico 1: Valor por convênio
-    const c1 = document.getElementById('chartConv');
-    if(c1){
-      const agr = {};
-      lancs.forEach(d=>{ const k=d.tipoProcesso||d.convenioLabel||'Outro'; agr[k]=(agr[k]||0)+d.valorTotal; });
-      const labels = Object.keys(agr);
-      const data = Object.values(agr).map(v=>Math.round(v*100)/100);
-      if(labels.length>0){
-        chartConvRef = new Chart(c1, {
-          type:'bar',
-          data:{ labels, datasets:[{ data, backgroundColor:labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]), borderRadius:6 }]},
-          options:{ plugins:{legend:{display:false}}, scales:{ y:{ticks:{callback:v=>fmtMoney(v)}} } }
-        });
-      }
-    }
+/* Barras visuais: Valor por tipo de convênio (HTML puro) */
+function dashBarrasConvenio(lancs){
+  const agr = {};
+  lancs.forEach(d=>{ const k=d.tipoProcesso||d.convenioLabel||'Outro'; agr[k]=(agr[k]||0)+d.valorTotal; });
+  const items = Object.entries(agr).sort((a,b)=>b[1]-a[1]);
+  if(items.length===0) return '<div style="text-align:center;padding:30px;color:var(--ink-soft);">Sem dados.</div>';
+  const max = Math.max(...items.map(([,v])=>v));
+  return items.map(([nome,valor],i)=>{
+    const pct = max>0 ? (valor/max*100) : 0;
+    const cor = CHART_COLORS[i%CHART_COLORS.length];
+    return `<div style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;">
+        <span style="font-size:12.5px;font-weight:600;color:var(--ink);">${esc(nome)}</span>
+        <span style="font-size:13px;font-weight:700;color:${cor};">${fmtMoney(valor)}</span>
+      </div>
+      <div style="background:var(--bg);border-radius:6px;height:10px;overflow:hidden;">
+        <div style="width:${pct.toFixed(1)}%;height:100%;background:${cor};border-radius:6px;transition:width .5s;"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
 
-    // Gráfico 2: Evolução temporal
-    const c2 = document.getElementById('chartEvo');
-    if(c2){
-      const agr = {};
-      lancs.forEach(d=>{ if(!agr[d.compSort]) agr[d.compSort]={v:0,q:0,label:d.competencia}; agr[d.compSort].v+=d.valorTotal; agr[d.compSort].q+=d.quantidade; });
-      const sorted = Object.entries(agr).sort(([a],[b])=>a.localeCompare(b));
-      if(sorted.length>0){
-        chartEvoRef = new Chart(c2, {
-          type:'line',
-          data:{ labels: sorted.map(([,v])=>v.label),
-            datasets:[{ label:'Valor total', data: sorted.map(([,v])=>Math.round(v.v*100)/100), borderColor:'#0E6E6E', backgroundColor:'rgba(14,110,110,.12)', fill:true, tension:.3 }]},
-          options:{ plugins:{legend:{display:false}}, scales:{ y:{ticks:{callback:v=>fmtMoney(v)}} } }
-        });
-      }
-    }
-  }, 50);
+/* Barras visuais: Evolução por período (HTML puro) */
+function dashBarrasEvolucao(lancs){
+  const agr = {};
+  lancs.forEach(d=>{ if(!agr[d.compSort]) agr[d.compSort]={v:0,q:0,label:d.competencia}; agr[d.compSort].v+=d.valorTotal; agr[d.compSort].q+=d.quantidade; });
+  const sorted = Object.entries(agr).sort(([a],[b])=>a.localeCompare(b));
+  if(sorted.length===0) return '<div style="text-align:center;padding:30px;color:var(--ink-soft);">Sem dados.</div>';
+  const maxV = Math.max(...sorted.map(([,v])=>v.v));
+  const maxQ = Math.max(...sorted.map(([,v])=>v.q));
+  return `<div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+      <thead><tr>
+        <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--teal-dark);background:var(--teal-soft);border-bottom:2px solid var(--line);">Competência</th>
+        <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--teal-dark);background:var(--teal-soft);border-bottom:2px solid var(--line);">Qtd. Exames</th>
+        <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--teal-dark);background:var(--teal-soft);border-bottom:2px solid var(--line);">Valor Total</th>
+        <th style="padding:8px 10px;font-size:11px;color:var(--teal-dark);background:var(--teal-soft);border-bottom:2px solid var(--line);min-width:120px;"></th>
+      </tr></thead>
+      <tbody>
+        ${sorted.map(([,d],i)=>{
+          const pctV = maxV>0 ? (d.v/maxV*100) : 0;
+          const variacao = i>0 ? (((d.q - sorted[i-1][1].q) / (sorted[i-1][1].q||1)) * 100).toFixed(1) : null;
+          const varHTML = variacao!==null ? `<span style="font-size:10px;font-weight:700;color:${variacao>=0?'var(--green)':'var(--red)'};">${variacao>=0?'▲':'▼'} ${Math.abs(variacao)}%</span>` : '';
+          return `<tr style="border-bottom:1px solid var(--line);">
+            <td style="text-align:center;padding:10px;font-weight:700;color:var(--teal-dark);">${esc(d.label)}</td>
+            <td style="text-align:center;padding:10px;">${fmtNum(d.q)} ${varHTML}</td>
+            <td style="text-align:center;padding:10px;font-weight:700;">${fmtMoney(d.v)}</td>
+            <td style="padding:10px;">
+              <div style="background:var(--bg);border-radius:4px;height:8px;overflow:hidden;">
+                <div style="width:${pctV.toFixed(1)}%;height:100%;background:var(--teal);border-radius:4px;"></div>
+              </div>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
 }
 
 /* Renderiza tabela Top Exames por Período (HTML puro, sem Chart.js) */
