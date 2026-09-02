@@ -197,7 +197,7 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 
 .helpbox{background:var(--teal-soft);border:1px solid #CFE7E5;color:var(--teal-dark);padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:14px;line-height:1.5;}
 .flexrow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
-.chartbox{height:260px;}
+.chartbox{height:260px;position:relative;}
 .loading-screen{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;z-index:200;color:var(--ink-soft);font-size:13px;}
 .spinner{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--teal);border-radius:50%;animation:spin .8s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
@@ -1517,7 +1517,7 @@ function viewDashboard(){
 /* Paleta de cores do gráfico, na mesma ordem de BADGE_CLASSES */
 const CHART_COLORS = ['#0E6E6E','#D98A3D','#5B3FA3','#2E6B44','#A2392F','#28588F','#8A3B7C','#8A6A16'];
 function colorForTipoIndex(i){ return CHART_COLORS[i % CHART_COLORS.length]; }
-let chartConvRef=null, chartEvoRef=null, chartLabValRef=null, chartLabTickRef=null, chartPieRef=null;
+let chartConvRef=null, chartEvoRef=null, chartLabValRef=null, chartLabTickRef=null, chartPieRef=null, chartCompConvRef=null, chartCompConvQtdRef=null;
 let dashFiltroConvenio='Todos', dashFiltroLab='Todos', dashFiltroVigencia='Todos', dashFiltroCompetencia='Consolidado';
 let dashChartTab='convenio';
 
@@ -1687,10 +1687,13 @@ function dashGerarInsights(lancs){
   return insights;
 }
 function drawDashboardCharts(){
+  setTimeout(_drawChartsNow, 60);
+}
+function _drawChartsNow(){
   const lancs = dashDadosFiltrados();
   // Destruir todos os gráficos anteriores
-  [chartConvRef,chartEvoRef,chartLabValRef,chartLabTickRef,chartPieRef].forEach(c=>{if(c)c.destroy();});
-  chartConvRef=chartEvoRef=chartLabValRef=chartLabTickRef=chartPieRef=null;
+  [chartConvRef,chartEvoRef,chartLabValRef,chartLabTickRef,chartPieRef,chartCompConvRef,chartCompConvQtdRef].forEach(c=>{if(c)try{c.destroy();}catch(e){}});
+  chartConvRef=chartEvoRef=chartLabValRef=chartLabTickRef=chartPieRef=chartCompConvRef=chartCompConvQtdRef=null;
 
   // ── Gráfico 1: Por convênio (só renderiza se a aba estiver ativa) ──
   if(dashChartTab==='convenio'){
@@ -1817,7 +1820,7 @@ function drawDashboardCharts(){
           backgroundColor: CHART_COLORS[i%CHART_COLORS.length],
           borderRadius: 4, maxBarThickness: 40
         }));
-        chartConvRef = new Chart(c6, {
+        chartCompConvRef = new Chart(c6, {
           type:'bar',
           data:{ labels: compLabels, datasets: datasetsValor },
           options:{ responsive:true, maintainAspectRatio:false,
@@ -1833,7 +1836,7 @@ function drawDashboardCharts(){
             backgroundColor: CHART_COLORS[i%CHART_COLORS.length]+'cc',
             borderRadius: 4, maxBarThickness: 40
           }));
-          chartEvoRef = new Chart(c7, {
+          chartCompConvQtdRef = new Chart(c7, {
             type:'bar',
             data:{ labels: compLabels, datasets: datasetsQtd },
             options:{ responsive:true, maintainAspectRatio:false,
