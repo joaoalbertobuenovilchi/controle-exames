@@ -272,6 +272,40 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 /* Marca de data/hora exibida apenas na impressão */
 .print-timestamp{display:none;}
 
+/* ---------------- Botão de fechar da tela de acesso ---------------- */
+.btn-fechar-app{
+  position:absolute;top:10px;right:12px;width:28px;height:28px;line-height:1;
+  border:none;border-radius:8px;background:transparent;color:var(--ink-soft);
+  font-size:17px;font-weight:700;cursor:pointer;transition:var(--transition);
+  display:flex;align-items:center;justify-content:center;padding:0;
+}
+.btn-fechar-app:hover{background:var(--red-soft);color:var(--red);}
+
+/* Versão exibida no rodapé da tela de acesso */
+.login-versao{
+  position:absolute;left:0;right:0;bottom:18px;text-align:center;
+  font-size:11px;color:rgba(255,255,255,.6);letter-spacing:.04em;
+}
+
+/* ---------------- Rodapé do aplicativo (discreto, fixo embaixo) ---------------- */
+.app-footer{
+  position:fixed;left:0;right:0;bottom:0;z-index:80;
+  display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:5px 16px;background:var(--teal-dark);color:rgba(255,255,255,.72);
+  font-size:11px;line-height:1.4;border-top:1px solid rgba(255,255,255,.12);
+  white-space:nowrap;overflow-x:auto;scrollbar-width:none;
+}
+.app-footer::-webkit-scrollbar{display:none;}
+.app-footer .af-item{display:flex;align-items:center;gap:5px;}
+.app-footer b{color:rgba(255,255,255,.92);font-weight:600;}
+.app-footer .af-sep{opacity:.35;}
+/* espaço para o rodapé não cobrir o conteúdo nem o fim do menu lateral */
+body.com-rodape main{padding-bottom:74px;}
+body.com-rodape .sidebar{padding-bottom:40px;}
+@media (max-width:720px){
+  .app-footer{font-size:10px;padding:4px 10px;gap:10px;}
+}
+
 /* ---------------- Caixa de escolha da orientação da impressão ---------------- */
 .print-orient-backdrop{position:fixed;inset:0;background:rgba(8,32,32,.45);z-index:400;display:none;align-items:center;justify-content:center;padding:20px;}
 .print-orient-backdrop.open{display:flex;}
@@ -323,6 +357,7 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
   .print-target .card .flexrow .btn{ display:none !important; }
   .print-target .chartbox{ height:220px; }
   .print-orient-backdrop{ display:none !important; }
+  .app-footer{ display:none !important; }
 }
 </style>
 </head>
@@ -348,7 +383,8 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 </div>
 
 <div id="loginScreen" style="display:none;position:fixed;inset:0;background:linear-gradient(135deg,#083e3e 0%,var(--teal-dark) 40%,#0C5A5A 70%,var(--teal) 100%);z-index:260;align-items:center;justify-content:center;padding:20px;">
-  <div class="card" style="max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25);border:none;">
+  <div class="card" style="max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25);border:none;position:relative;">
+    <button type="button" class="btn-fechar-app" onclick="fecharAplicativo()" title="Fechar o aplicativo" aria-label="Fechar o aplicativo">✕</button>
     <div style="text-align:center;margin-bottom:16px;">
       <div style="width:56px;height:56px;border-radius:14px;background:var(--teal-soft);display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:10px;">🧪</div>
       <h2 style="margin:0 0 4px;">Acesso ao sistema</h2>
@@ -371,6 +407,7 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
     <div style="text-align:center;margin-top:10px;"><a href="#" onclick="esqueciMinhaSenha();return false;" style="font-size:12px;">Esqueci minha senha</a></div>
     <div class="muted" style="font-size:11.5px;margin-top:10px;">Cada usuário tem acesso individual. O administrador do sistema pode cadastrar novos usuários no módulo "Usuários".</div>
   </div>
+  <div class="login-versao" id="loginVersao"></div>
 </div>
 
 <div id="accessCodeScreen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:250;align-items:center;justify-content:center;padding:20px;">
@@ -426,6 +463,14 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
     </div>
     <div id="view"></div>
   </main>
+
+  <!-- Rodapé discreto: versão do aplicativo, usuário logado e CNPJ da entidade.
+       É preenchido por atualizarRodape(), a cada render. Não aparece na impressão. -->
+  <div class="app-footer" id="appFooter">
+    <div class="af-item">v. <b id="rodapeVersao">—</b></div>
+    <div class="af-item">Usuário: <b id="rodapeUsuario">—</b></div>
+    <div class="af-item">CNPJ: <b id="rodapeCnpj">—</b></div>
+  </div>
 </div>
 
 <!-- Caixa que pergunta a orientação do papel na hora de imprimir um relatório.
@@ -774,6 +819,41 @@ function trocarCodigoAcesso(){
   location.reload();
 }
 
+/* ============================================================
+   VERSÃO DO APLICATIVO
+   Formato: <mês sequencial desde a criação>.<nº da alteração>.<ano>
+   O primeiro número conta os meses de vida do aplicativo (julho/2026 = 1,
+   agosto/2026 = 2, setembro/2026 = 3 ...). O segundo é o número acumulado de
+   alterações publicadas. Exemplo pedido: criação 1.0.2026 → 1.01.2026 →
+   1.02.2026 → (virou o mês) 2.03.2026.
+
+   Ao publicar uma alteração nova: some 1 em APP_ALTERACAO e atualize APP_DATA.
+   O mês sequencial é calculado sozinho.
+
+   Histórico reconstruído a partir das versões guardadas na pasta Downloads
+   (uma versão para cada arquivo com conteúdo diferente):
+     1.0.2026   22/07/2026      criação do aplicativo
+     1.01–1.04  22–23/07/2026   4 alterações
+     2.05–2.22  12–31/08/2026   18 alterações
+     3.23.2026  03/09/2026      módulos Cadastro da Entidade e Glosas
+     3.24.2026  03/09/2026      relatórios: escolha da orientação na impressão,
+                                somas totais, numeração dos relatórios de glosas
+                                e Consolidado dividido em três módulos
+     3.25.2026  03/09/2026      responsável pelo faturamento vindo do cadastro do
+                                laboratório, rodapé com versão/usuário/CNPJ e
+                                botão de fechar na tela de acesso
+   ============================================================ */
+const APP_CRIACAO = { mes: 7, ano: 2026 };   // julho/2026 = mês 1
+const APP_ALTERACAO = 25;                     // nº acumulado de alterações publicadas
+const APP_DATA = '2026-09-03';                // data desta versão (AAAA-MM-DD)
+function appVersao(){
+  const p = APP_DATA.split('-').map(Number);
+  const ano = p[0], mes = p[1];
+  const seqMes = (ano - APP_CRIACAO.ano)*12 + (mes - APP_CRIACAO.mes) + 1;
+  const n = APP_ALTERACAO===0 ? '0' : String(APP_ALTERACAO).padStart(2,'0');
+  return `${seqMes}.${n}.${ano}`;
+}
+
 const MESES = ["JANEIRO","FEVEREIRO","MARÇO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"];
 
 /* Paleta de cores dos badges, usada em ordem para cada tipo de convênio/processo cadastrado */
@@ -1027,6 +1107,44 @@ function entidadeFantasia(){
 function atualizarMarcaEntidade(){
   const el = document.getElementById('brandFantasia');
   if(el) el.textContent = entidadeFantasia();
+}
+/* Formata o CNPJ do Cadastro da Entidade como 00.000.000/0000-00 quando ele tiver
+   os 14 dígitos. Se estiver preenchido de outro jeito, mostra exatamente como foi
+   digitado — nenhum dado cadastrado é alterado, só a exibição. */
+function fmtCNPJ(v){
+  const d = String(v||'').replace(/\D/g,'');
+  if(d.length!==14) return String(v||'').trim();
+  return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
+}
+/* Rodapé discreto do aplicativo: versão, usuário logado e CNPJ da entidade. */
+function atualizarRodape(){
+  const ver = document.getElementById('rodapeVersao');
+  if(ver) ver.textContent = appVersao();
+  const usr = document.getElementById('rodapeUsuario');
+  if(usr) usr.textContent = currentUser ? ((currentUser.usuario||'') + (currentUser.nome ? ' | '+String(currentUser.nome).toUpperCase() : '')) : '—';
+  const cnpj = document.getElementById('rodapeCnpj');
+  if(cnpj) cnpj.textContent = fmtCNPJ(STATE.entidade && STATE.entidade.cnpj) || '—';
+  document.body.classList.add('com-rodape');
+}
+/* Fecha o aplicativo. Por segurança, o navegador só permite fechar por script as
+   abas que o próprio script abriu; quando ele bloqueia, mostramos uma tela de
+   despedida avisando que a aba pode ser fechada normalmente. */
+function fecharAplicativo(){
+  try{ window.close(); }catch(e){}
+  setTimeout(()=>{
+    if(!document.hidden){
+      document.body.innerHTML =
+        '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;'
+      + 'background:linear-gradient(135deg,#083e3e 0%,#0A4F4F 40%,#0C5A5A 70%,#0E6E6E 100%);'
+      + 'font-family:Inter,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#fff;padding:20px;text-align:center;">'
+      + '<div><div style="font-size:40px;margin-bottom:14px;">🧪</div>'
+      + '<div style="font-size:17px;font-weight:700;margin-bottom:6px;">Sessão encerrada</div>'
+      + '<div style="font-size:13px;opacity:.8;">O seu navegador não permite que uma página feche a si mesma.<br>'
+      + 'Pode fechar esta aba com tranquilidade.</div>'
+      + '<div style="font-size:11px;opacity:.5;margin-top:18px;">v. ' + appVersao() + '</div>'
+      + '</div></div>';
+    }
+  }, 250);
 }
 function pad2(n){ return String(n).padStart(2,'0'); }
 /* Ex.: "01/07/2026 A 31/07/2026" */
@@ -1446,6 +1564,7 @@ function render(){
 }
 function afterRender(){
   atualizarMarcaEntidade();
+  atualizarRodape();
   const btnAlt = document.getElementById('btnAlterarCompetencia');
   if(btnAlt) btnAlt.style.display = isMaster() ? '' : 'none';
   const btnImp = document.getElementById('btnImportarDados');
@@ -2327,7 +2446,8 @@ function salvarRelatorioGlosas(){
   const cfg = glosaCfg();
   const {seq, numero} = proximoNumeroGlosa(mes, ano);
   const agora = new Date().toISOString();
-  const por = glosaResponsavelFaturamento();
+  const por = glosaResponsavelFaturamento();   // assina o relatório (vem do cadastro do laboratório)
+  const porUsuario = usuarioLogadoNome();       // quem operou o sistema (histórico de acompanhamento)
   if(!confirm(`Salvar o Relatório de Glosas da competência ${mes}/${ano} com o número ${numero}?\n\nEle fica guardado para acompanhamento em Consolidado → Relatórios de Glosas. Nenhuma glosa ou lançamento é alterado.`)) return;
   STATE.glosaRelatorios.push({
     id: uid(), numero, seq, mes, ano,
@@ -2349,7 +2469,7 @@ function salvarRelatorioGlosas(){
     motivos: JSON.parse(JSON.stringify(STATE.glosaMotivos||[])),
     justificativas: JSON.parse(JSON.stringify(STATE.glosaJustificativas||[])),
     planoAcao: JSON.parse(JSON.stringify(STATE.glosaPlanoAcao||[])),
-    historicoStatus: [{ status: cfg.status || GLOSA_STATUS[0], em: agora, por, obs: 'Relatório salvo.' }],
+    historicoStatus: [{ status: cfg.status || GLOSA_STATUS[0], em: agora, por: porUsuario, obs: 'Relatório salvo.' }],
   });
   glosaBuscaAberta = true;
   saveState(); render();
@@ -2365,7 +2485,7 @@ function atualizarStatusRelatorioGlosa(id, novoStatus, obs){
   if(!novoStatus || novoStatus===r.status) return;
   r.status = novoStatus;
   if(!Array.isArray(r.historicoStatus)) r.historicoStatus = [];
-  r.historicoStatus.push({ status: novoStatus, em: new Date().toISOString(), por: glosaResponsavelFaturamento(), obs: obs||'' });
+  r.historicoStatus.push({ status: novoStatus, em: new Date().toISOString(), por: usuarioLogadoNome(), obs: obs||'' });
   saveState(); render();
   showToast(`Relatório ${r.numero}: status atualizado para "${novoStatus}".`,'success');
 }
@@ -2954,8 +3074,26 @@ function painelBuscaRelatoriosGlosas(){
 }
 
 /* ---------------- Relatório de Glosas (item por item, conforme o modelo) ---------------- */
-function glosaResponsavelFaturamento(){
+/* Nome de quem está operando o sistema — usado no histórico de acompanhamento
+   dos relatórios salvos (quem registrou cada mudança de status). */
+function usuarioLogadoNome(){
   return currentUser ? (currentUser.nome || currentUser.usuario) : '—';
+}
+/* Nome que assina o Relatório de Glosas como "Responsável pelo Faturamento/Auditoria".
+   Vem do campo "Responsável (gestor/diretor)" do módulo
+   Cadastros → Laboratórios/Clínicas/Operadoras — não do usuário logado.
+   Com o filtro em "Todos", usa o responsável do laboratório quando todas as glosas
+   da competência forem de um único laboratório/clínica/operadora. */
+function glosaResponsavelFaturamento(){
+  const nomeDoLab = nome => {
+    const lab = (STATE.labs||[]).find(l=>l.nome===nome);
+    const r = lab ? String(lab.responsavel||'').trim() : '';
+    return r || '';
+  };
+  if(glosaLabFilter!=='TODOS') return nomeDoLab(glosaLabFilter) || '—';
+  const labs = [...new Set(glosasFiltradas().map(g=>g.laboratorio).filter(Boolean))];
+  if(labs.length===1) return nomeDoLab(labs[0]) || '—';
+  return '—';
 }
 function glosaGestorLaboratorio(){
   if(glosaLabFilter==='TODOS') return '';
@@ -5360,6 +5498,9 @@ document.addEventListener('keydown', function(e){
    LOADING SCREEN MELHORADO
    ============================================================ */
 (function init(){
+  /* Versão exibida no rodapé da tela de acesso */
+  const lv = document.getElementById('loginVersao');
+  if(lv) lv.textContent = 'Versão ' + appVersao();
   if(!firebaseOk){
     document.getElementById('loadingScreen').style.display = 'none';
     document.getElementById('configScreen').style.display = 'flex';
