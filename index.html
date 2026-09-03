@@ -354,10 +354,10 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
       <h2 style="margin:0 0 4px;">Acesso ao sistema</h2>
       <div style="font-size:11px;color:var(--ink-soft);font-weight:600;letter-spacing:.03em;">CONTROLE DE EXAMES LABORATORIAIS/EXAMES DE IMAGEM</div>
     </div>
-    <div class="subtitle" style="text-align:center;">Prefeitura Municipal de Jaborandi</div>
+    <div class="subtitle" style="text-align:center;" id="loginEntidade"></div>
     <div class="field" style="margin-bottom:12px;">
       <label>Usuário</label>
-      <input type="text" id="loginUsuario" placeholder="Ex.: joao" autocomplete="username" onkeydown="if(event.key==='Enter'){document.getElementById('loginSenha').focus();}">
+      <input type="text" id="loginUsuario" placeholder="seu usuário" autocomplete="username" onkeydown="if(event.key==='Enter'){document.getElementById('loginSenha').focus();}">
     </div>
     <div class="field" style="margin-bottom:6px;">
       <label>Senha</label>
@@ -379,7 +379,7 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
     <div class="subtitle">Use o mesmo código em todos os computadores (inclusive home office) para acessar os mesmos dados na nuvem.</div>
     <div class="field" style="margin-bottom:12px;">
       <label>Código da equipe/setor</label>
-      <input type="text" id="accessCodeInput" placeholder="Ex.: farmacia-jaborandi-2026" autocomplete="off">
+      <input type="text" id="accessCodeInput" placeholder="Ex.: nome-da-entidade-2026" autocomplete="off">
     </div>
     <div class="flexrow" style="gap:8px;">
       <button class="btn" style="flex:1;" onclick="submitAccessCode()">Entrar</button>
@@ -389,13 +389,34 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
   </div>
 </div>
 
+<!-- Primeiro acesso: aparece só quando ainda NÃO existe nenhum administrador cadastrado
+     (instalação nova ou sistema zerado para uma nova implantação). É aqui que o cliente
+     cria o próprio administrador — nenhuma senha fica gravada no código-fonte. -->
+<div id="primeiroAcessoScreen" style="display:none;position:fixed;inset:0;background:linear-gradient(135deg,#083e3e 0%,var(--teal-dark) 40%,#0C5A5A 70%,var(--teal) 100%);z-index:255;align-items:center;justify-content:center;padding:20px;">
+  <div class="card" style="max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25);border:none;">
+    <div style="text-align:center;margin-bottom:14px;">
+      <div style="width:56px;height:56px;border-radius:14px;background:var(--teal-soft);display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:10px;">🏗️</div>
+      <h2 style="margin:0 0 4px;">Primeiro acesso — criar administrador</h2>
+      <div style="font-size:11px;color:var(--ink-soft);font-weight:600;letter-spacing:.03em;">CONTROLE DE EXAMES LABORATORIAIS/EXAMES DE IMAGEM</div>
+    </div>
+    <div class="helpbox">Este sistema ainda não tem nenhum usuário cadastrado. Crie agora o <b>administrador</b> desta entidade. Ele terá acesso total e poderá cadastrar os demais usuários depois, no módulo Administração.</div>
+    <div class="field" style="margin-top:12px;"><label>Nome completo</label><input type="text" id="paNome" placeholder="Ex.: Maria Silva" autocomplete="off"></div>
+    <div class="field" style="margin-top:10px;"><label>Usuário (login)</label><input type="text" id="paUsuario" placeholder="Ex.: maria" autocomplete="off"></div>
+    <div class="field" style="margin-top:10px;"><label>Senha</label><input type="password" id="paSenha" placeholder="Mínimo de 8 caracteres" autocomplete="new-password"></div>
+    <div class="field" style="margin-top:10px;"><label>Repita a senha</label><input type="password" id="paSenha2" placeholder="Digite a senha novamente" autocomplete="new-password" onkeydown="if(event.key==='Enter') criarAdministradorInicial();"></div>
+    <div id="paErro" style="color:var(--red);font-size:12px;margin-top:10px;display:none;"></div>
+    <button class="btn" style="width:100%;justify-content:center;margin-top:14px;" onclick="criarAdministradorInicial()">Criar administrador e entrar</button>
+    <div class="muted" style="font-size:11px;margin-top:10px;">Anote a senha em local seguro. Não há como recuperá-la sem outro administrador cadastrado.</div>
+  </div>
+</div>
+
 <div id="app" style="display:none;">
   <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="brand-mark">🧪</div>
       <div>
         <div class="brand-title">CONTROLE DE EXAMES<br>LABORATORIAIS/EXAMES DE IMAGEM</div>
-        <div class="brand-sub" id="brandFantasia">Prefeitura Municipal de Jaborandi</div>
+        <div class="brand-sub" id="brandFantasia"></div>
       </div>
     </div>
     <nav class="navlist" id="navlist"></nav>
@@ -566,9 +587,11 @@ async function loadUsersState(){
   await garantirUsuarioMaster();
   usersLoaded = true;
 }
-/* Garante que o usuário administrador/master (João) sempre exista, sem nunca sobrescrever
-   ou apagar usuários já cadastrados. Só cria o usuário master na primeira vez, quando a
-   lista de usuários ainda não existir. */
+/* Prepara a lista de usuários (migrações suaves) SEM criar ninguém automaticamente.
+   Antes, um administrador com senha fixa era criado aqui — a senha ficava legível no
+   código-fonte, que é público. Agora, quando não existe nenhum administrador, o próprio
+   cliente cria o dele na tela de "Primeiro acesso" (criarAdministradorInicial).
+   Usuários já cadastrados nunca são alterados nem apagados por esta função. */
 async function garantirUsuarioMaster(){
   if(!Array.isArray(USERS_STATE.usuarios)) USERS_STATE.usuarios = [];
   if(!Array.isArray(USERS_STATE.logs)) USERS_STATE.logs = [];
@@ -580,13 +603,33 @@ async function garantirUsuarioMaster(){
     if(!u.perfil){ u.perfil = u.master ? 'master' : 'comum'; mudou = true; }
     if(u.bloqueado===undefined){ u.bloqueado = false; }
   });
-  const existeJoao = USERS_STATE.usuarios.some(u=>u.usuario==='joao');
-  if(!existeJoao){
-    const senhaHash = await hashSenha('#Rnjc160274');
-    USERS_STATE.usuarios.push({ id: uid(), usuario:'joao', nome:'João', master:true, perfil:'master', senhaHash, criadoEm:new Date().toISOString() });
-    mudou = true;
-  }
   if(mudou) saveUsersState(true);
+}
+/* Existe pelo menos um administrador (master) cadastrado? */
+function existeAdministrador(){
+  return (USERS_STATE.usuarios||[]).some(u=>(u.perfil==='master') || u.master===true);
+}
+/* Cria o administrador na tela de Primeiro acesso e já entra no sistema. */
+async function criarAdministradorInicial(){
+  const erroEl = document.getElementById('paErro');
+  const erro = m=>{ erroEl.textContent = m; erroEl.style.display='block'; };
+  erroEl.style.display='none';
+  const nome = document.getElementById('paNome').value.trim();
+  const usuario = document.getElementById('paUsuario').value.trim().toLowerCase();
+  const senha = document.getElementById('paSenha').value;
+  const senha2 = document.getElementById('paSenha2').value;
+  if(!nome) return erro('Informe o nome completo do administrador.');
+  if(!/^[a-z0-9._-]{3,}$/.test(usuario)) return erro('O usuário deve ter ao menos 3 caracteres, sem espaços e sem acentos (letras, números, ponto, hífen ou sublinhado).');
+  if(senha.length < 8) return erro('A senha precisa ter pelo menos 8 caracteres.');
+  if(senha !== senha2) return erro('As duas senhas não são iguais.');
+  if(existeAdministrador()) return erro('Já existe um administrador cadastrado. Recarregue a página e entre com o usuário e a senha dele.');
+  if((USERS_STATE.usuarios||[]).some(u=>u.usuario===usuario)) return erro('Já existe um usuário com este login.');
+  const senhaHash = await hashSenha(senha);
+  const novo = { id: uid(), usuario, nome, master:true, perfil:'master', senhaHash, bloqueado:false, criadoEm:new Date().toISOString() };
+  USERS_STATE.usuarios.push(novo);
+  saveUsersState(true);
+  document.getElementById('primeiroAcessoScreen').style.display = 'none';
+  iniciarSessaoUsuario(novo);
 }
 let usersSaveTimer = null;
 function saveUsersState(imediato){
@@ -751,12 +794,18 @@ function sairDoSistema(){
 }
 
 /* ---------------- Código de acesso (sincroniza entre computadores) ---------------- */
-function getAccessCode(){ return localStorage.getItem('cel_access_code') || ''; }
-function setAccessCode(code){ localStorage.setItem('cel_access_code', code); }
+function getAccessCode(){ try{ return localStorage.getItem('cel_access_code') || ''; }catch(e){ return ''; } }
+function setAccessCode(code){ try{ localStorage.setItem('cel_access_code', code); }catch(e){} }
 function slugifyCode(v){ return v.trim().toLowerCase().replace(/[^a-z0-9\-_.]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,''); }
+/* Sugere um código de acesso novo. O prefixo sai do nome da entidade já cadastrada
+   (quando houver) — em uma instalação nova, usa um prefixo neutro. Nada de nome de
+   cliente fixo no código-fonte. */
 function generateAccessCode(){
   const rand = Math.random().toString(36).slice(2,8) + Math.random().toString(36).slice(2,6);
-  document.getElementById('accessCodeInput').value = 'jaborandi-' + rand;
+  const nome = String((STATE.entidade && (STATE.entidade.nomeFantasia || STATE.entidade.nome)) || '')
+                 .normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const base = slugifyCode(nome).split('-').filter(p=>p.length>3).slice(-1)[0] || 'entidade';
+  document.getElementById('accessCodeInput').value = base + '-' + rand;
   showToast('Código sugerido gerado. Confira e clique em Entrar.');
 }
 function submitAccessCode(){
@@ -850,7 +899,10 @@ async function loadState(){
    mesmo em backups/dados antigos gerados antes deste módulo existir. Nunca sobrescreve
    uma lista já existente — apenas cria a padrão se estiver totalmente ausente/vazia. */
 function garantirTiposConvenio(){
-  if(!Array.isArray(STATE.tiposConvenio) || STATE.tiposConvenio.length===0){
+  /* Só cria a lista padrão quando ela está AUSENTE (dado antigo, anterior a este módulo).
+     Uma lista propositalmente vazia — sistema recém-zerado para uma nova implantação —
+     permanece vazia, para o cliente cadastrar os tipos conforme a necessidade dele. */
+  if(!Array.isArray(STATE.tiposConvenio)){
     STATE.tiposConvenio = DEFAULT_TIPOS_CONVENIO.map(t=>({...t}));
   }
   // Migração suave: tipos já cadastrados antes deste recurso existir ganham a configuração
@@ -861,8 +913,8 @@ function garantirTiposConvenio(){
     if(t.pctPrincipal===undefined) t.pctPrincipal = t.usaCotaReserva ? 50 : 100;
     if(t.pctReserva===undefined) t.pctReserva = t.usaCotaReserva ? 50 : 0;
   });
-  if(!STATE.tiposConvenio.find(t=>t.key===lancTab)) lancTab = STATE.tiposConvenio[0].key;
-  if(!STATE.tiposConvenio.find(t=>t.key===nfTab)) nfTab = STATE.tiposConvenio[0].key;
+  if(!STATE.tiposConvenio.find(t=>t.key===lancTab)) lancTab = (STATE.tiposConvenio[0]||{}).key;
+  if(!STATE.tiposConvenio.find(t=>t.key===nfTab)) nfTab = (STATE.tiposConvenio[0]||{}).key;
   garantirApelidosExames();
   garantirQtdTotalExames();
   garantirModulosNovos();
@@ -876,6 +928,18 @@ function garantirModulosNovos(){
   ['nome','cnpj','nomeFantasia','endereco','numero','cep','telefone'].forEach(k=>{
     if(STATE.entidade[k]===undefined) STATE.entidade[k] = '';
   });
+  /* Migração suave da marca dos relatórios: antes, o nome da prefeitura era fixo no
+     código-fonte e aparecia por padrão em todo relatório. Agora ele vem só do Cadastro
+     da Entidade. Para que NADA mude em um sistema que já está em uso, se o cadastro
+     estiver em branco mas já existirem dados lançados, o nome antigo é gravado uma única
+     vez no cadastro — e a partir daí pode ser editado normalmente. Em uma implantação
+     nova (sem nenhum dado), nada é gravado: o cliente preenche o próprio nome. */
+  const jaTemDados = ((STATE.labs||[]).length + (STATE.exames||[]).length
+                    + (STATE.lancamentos||[]).length + (STATE.historico||[]).length) > 0;
+  if(jaTemDados && !String(STATE.entidade.nome||'').trim() && !String(STATE.entidade.nomeFantasia||'').trim()){
+    STATE.entidade.nome = MARCA_LEGADA;
+    STATE.entidade.nomeFantasia = MARCA_LEGADA;
+  }
   if(!Array.isArray(STATE.glosas)) STATE.glosas = [];
   if(!Array.isArray(STATE.glosaJustificativas)) STATE.glosaJustificativas = [];
   if(!Array.isArray(STATE.glosaPlanoAcao)) STATE.glosaPlanoAcao = [];
@@ -887,7 +951,9 @@ function garantirModulosNovos(){
     if(!Array.isArray(r.historicoStatus)) r.historicoStatus = [];
     if(r.status===undefined) r.status = 'Em preenchimento';
   });
-  if(!Array.isArray(STATE.glosaMotivos) || STATE.glosaMotivos.length===0){
+  /* Idem aos tipos de convênio: os motivos sugeridos só nascem quando a lista está
+     AUSENTE. Uma lista vazia de propósito (sistema zerado) continua vazia. */
+  if(!Array.isArray(STATE.glosaMotivos)){
     STATE.glosaMotivos = DEFAULT_GLOSA_MOTIVOS.map(m=>({ id: uid(), ...m }));
   }
   /* Laboratórios cadastrados antes destes campos existirem: recebem o tipo de
@@ -1010,19 +1076,24 @@ function cadastroValueFor(key){ const t=STATE.tiposConvenio.find(c=>c.key===key)
 /* A partir do valor gravado num exame, encontra a que tipo de convênio/processo ele pertence */
 function tipoConvenioByCadastroValue(cadastroValue){ return STATE.tiposConvenio.find(t=>t.cadastroValue===cadastroValue); }
 
-/* ---------------- Cabeçalho padrão dos relatórios ---------------- */
-const PREFEITURA_NOME = 'Prefeitura Municipal de Jaborandi';
-/* Nome que aparece no topo dos relatórios: usa o "Nome da entidade" do módulo
-   "Cadastro da Entidade" quando estiver preenchido e, enquanto não estiver,
-   continua exatamente como sempre foi (Prefeitura Municipal de Jaborandi). */
+/* ---------------- Cabeçalho padrão dos relatórios ----------------
+   O nome que encabeça os relatórios vem SEMPRE do módulo "Cadastro da Entidade".
+   Nenhuma prefeitura fica fixa no código-fonte — é isso que permite instalar o
+   mesmo aplicativo em qualquer entidade. Enquanto o cadastro estiver em branco,
+   aparece um texto neutro pedindo o preenchimento.
+   MARCA_LEGADA existe só para a migração suave em garantirModulosNovos(): em
+   sistemas que já estavam em uso quando o nome era fixo no código, ele é gravado
+   uma única vez no Cadastro da Entidade, de onde passa a ser editável. */
+const MARCA_LEGADA = 'Prefeitura Municipal de Jaborandi';
+const PREFEITURA_NOME_PADRAO = 'Preencha o Cadastro da Entidade';
 function entidadeNome(){
   const n = (STATE.entidade && STATE.entidade.nome || '').trim();
-  return n || PREFEITURA_NOME;
+  return n || PREFEITURA_NOME_PADRAO;
 }
 /* Nome fantasia exibido logo abaixo do nome do aplicativo, no canto superior esquerdo */
 function entidadeFantasia(){
   const f = (STATE.entidade && STATE.entidade.nomeFantasia || '').trim();
-  return f || PREFEITURA_NOME;
+  return f || (STATE.entidade && STATE.entidade.nome || '').trim() || 'Sistema não implantado';
 }
 function atualizarMarcaEntidade(){
   const el = document.getElementById('brandFantasia');
@@ -1376,6 +1447,7 @@ const NAV_ADMIN = [
   {group:'7. Administração', items:[
     {id:'usuarios', label:'Usuários', icon:'👤'},
     {id:'logAcesso', label:'Log de Acesso', icon:'📜'},
+    {id:'implantacao', label:'Implantação / Novo Cliente', icon:'🏗️'},
   ]},
 ];
 function getNav(){
@@ -1396,6 +1468,7 @@ const PAGE_META = {
   relatoriosGlosas:['Consolidado — Relatórios de Glosas','Acompanhamento dos relatórios de glosas já emitidos, pela numeração e pelo status do cronograma de recurso.'],
   usuarios:['Usuários','Cadastre usuários e senhas para acesso ao sistema. Apenas o administrador (master) vê este módulo.'],
   logAcesso:['Log de Acesso','Veja quem usou o sistema: usuário, data, hora início, hora final e comandos acessados. Apenas o administrador (master) vê este módulo.'],
+  implantacao:['Implantação / Novo Cliente','Prepare o sistema para uma nova entidade: zere a base, salve e aplique modelos de cadastro. Apenas o administrador (master) vê este módulo.'],
 };
 
 function renderNav(){
@@ -1408,7 +1481,7 @@ function renderNav(){
   if(userEl) userEl.textContent = currentUser ? ('👤 '+(currentUser.nome||currentUser.usuario)+' — '+perfilLabel(perfilAtual())) : '';
 }
 function goto(view){
-  if((view==='usuarios' || view==='logAcesso') && !isMaster()) view = 'dashboard';
+  if((view==='usuarios' || view==='logAcesso' || view==='implantacao') && !isMaster()) view = 'dashboard';
   currentView = view;
   document.getElementById('pageTitle').textContent = PAGE_META[view][0];
   document.getElementById('pageDesc').textContent = PAGE_META[view][1];
@@ -1438,6 +1511,7 @@ function render(){
   else if(currentView==='relatoriosGlosas') v.innerHTML = viewRelatoriosGlosas();
   else if(currentView==='usuarios') v.innerHTML = viewUsuarios();
   else if(currentView==='logAcesso') v.innerHTML = viewLogAcesso();
+  else if(currentView==='implantacao') v.innerHTML = viewImplantacao();
   const VIEWS_COM_FORM = ['entidade','labs','exames','tiposConvenio','lancamento','comparativo','glosas','relatorios','relatoriosImagem','relatoriosGlosas'];
   if(!podeEditar(currentView) && VIEWS_COM_FORM.includes(currentView)){
     v.insertAdjacentHTML('afterbegin', `<div class="read-only-notice">🔒 Seu perfil de acesso (${esc(perfilLabel(perfilAtual()))}) permite apenas visualizar e imprimir este módulo.</div>`);
@@ -2134,7 +2208,7 @@ function viewEntidade(){
       <h2>Dados da entidade</h2>
       <div class="subtitle">Preencha os campos e clique em salvar.</div>
       <div class="formgrid">
-        <div class="field half"><label>Nome da entidade</label><input id="entNome" placeholder="Ex: Prefeitura Municipal de Jaborandi" value="${esc(e.nome||'')}"></div>
+        <div class="field half"><label>Nome da entidade</label><input id="entNome" placeholder="Ex: Prefeitura Municipal de ..." value="${esc(e.nome||'')}"></div>
         <div class="field"><label>CNPJ</label><input id="entCnpj" placeholder="00.000.000/0000-00" value="${esc(e.cnpj||'')}"></div>
         <div class="field"><label>Nome fantasia</label><input id="entFantasia" placeholder="Ex: Secretaria Municipal de Saúde" value="${esc(e.nomeFantasia||'')}"></div>
         <div class="field half"><label>Endereço</label><input id="entEndereco" placeholder="Ex: Rua Sete de Setembro" value="${esc(e.endereco||'')}"></div>
@@ -3180,6 +3254,7 @@ Gestor/Diretor do Laboratório: ${glosaGestorLaboratorio()||'—'}`;
    CADASTRO DE EXAMES
    ============================================================ */
 function viewExames(){
+  if(STATE.tiposConvenio.length===0) return avisoSemTiposConvenio('O cadastro de exames');
   const editing = editingExameId ? STATE.exames.find(e=>e.id===editingExameId) : null;
   const labsOpts = labsForSelect().map(l=>`<option value="${esc(l.nome)}" ${editing && editing.laboratorio===l.nome?'selected':''}>${esc(l.nome)}</option>`).join('');
   const qtdTotalIni = editing ? (editing.qtdTotal ?? (editing.cotaPrincipal+editing.cotaReserva)) : 0;
@@ -3578,8 +3653,8 @@ function deleteTipoConvenio(key){
   }
   if(!confirm(`Excluir o tipo de convênio/processo "${t.label}"? Esta ação não pode ser desfeita.`)) return;
   STATE.tiposConvenio = STATE.tiposConvenio.filter(x=>x.key!==key);
-  if(lancTab===key) lancTab = STATE.tiposConvenio[0].key;
-  if(nfTab===key) nfTab = STATE.tiposConvenio[0].key;
+  if(lancTab===key) lancTab = (STATE.tiposConvenio[0]||{}).key;
+  if(nfTab===key) nfTab = (STATE.tiposConvenio[0]||{}).key;
   if(editingTipoConvenioKey===key) editingTipoConvenioKey = null;
   saveState(); render(); showToast('Tipo de convênio/processo excluído.');
 }
@@ -3587,7 +3662,18 @@ function deleteTipoConvenio(key){
 /* ============================================================
    LANÇAMENTO DE EXAMES  (Compra Direta / Dispensa / Pregão)
    ============================================================ */
+/* Aviso mostrado nos módulos que só funcionam depois que existe pelo menos um tipo de
+   convênio/processo cadastrado — situação normal logo após uma implantação zerada. */
+function avisoSemTiposConvenio(oQue){
+  return `<div class="card">
+    <h2>Nenhum tipo de convênio/processo cadastrado</h2>
+    <div class="subtitle">${esc(oQue)} depende dos tipos de convênio/processo da entidade (por exemplo: Compra Direta, Dispensa de Licitação, Pregão Eletrônico).</div>
+    <div class="helpbox">Vá em <b>1. Cadastros → Tipos de Convênio/Processo</b> e cadastre os tipos usados por esta entidade. Depois volte aqui.</div>
+    <div style="margin-top:14px;"><button class="btn" onclick="goto('tiposConvenio')">📁 Ir para Tipos de Convênio/Processo</button></div>
+  </div>`;
+}
 function viewLancamento(){
+  if(STATE.tiposConvenio.length===0) return avisoSemTiposConvenio('O lançamento de exames');
   if(!STATE.tiposConvenio.find(t=>t.key===lancTab)) lancTab = STATE.tiposConvenio[0]?.key;
   const cadConv = cadastroValueFor(lancTab);
   const labsOpts = labsForSelect().map(l=>`<option value="${esc(l.nome)}">${esc(l.nome)}</option>`).join('');
@@ -4080,6 +4166,7 @@ function computeCotaTotais(lancs){
 }
 
 function viewNF(){
+  if(STATE.tiposConvenio.length===0) return avisoSemTiposConvenio('A emissão de N.F.');
   if(!STATE.tiposConvenio.find(t=>t.key===nfTab)) nfTab = STATE.tiposConvenio[0]?.key;
   const cadConv = cadastroValueFor(nfTab);
   const compOpts = nfCompetenciaOptions();
@@ -4168,7 +4255,7 @@ function emailReportLab(labName, convKey){
   const compTxt = nfCompetenciaLabelText();
   const subject = `Resumo para emissão de N.F. - ${labName} - ${convenioLabel(convKey)} - ${compTxt}`;
   const body =
-`${PREFEITURA_NOME}
+`${entidadeNome()}
 Convênio: ${convenioLabel(convKey)}
 Laboratório: ${labName}
 Vigência: ${vigenciaFor(labName, cadConv)}
@@ -4534,839 +4621,4 @@ function restaurarCompetencia(){
    Lançamentos nem afeta qualquer outro dado já cadastrado no sistema.
    ============================================================ */
 let comparativoTab = null; // resolvido dinamicamente para o primeiro tipo de convênio/processo disponível
-let comparativoState = {}; // { [tipoKey]: {principalLab, principalArquivo, principalRows, tercLab, tercArquivo, tercRows} }
-
-function comparativoDataFor(tipoKey){
-  if(!comparativoState[tipoKey]) comparativoState[tipoKey] = { principalLab:'', principalArquivo:'', principalRows:null, tercLab:'', tercArquivo:'', tercRows:null };
-  return comparativoState[tipoKey];
-}
-function setComparativoTab(t){ comparativoTab = t; render(); }
-/* Normaliza texto para comparação (maiúsculas, sem acentos, sem espaços duplicados) */
-function normTxt(s){
-  return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
-}
-/* Extrai paciente/exame/quantidade de cada linha do arquivo importado, reaproveitando
-   o mesmo motor de leitura de colunas (extractField) usado no Lançamento de Exames. */
-function extractComparativoRows(rows){
-  return rows.map(r=>({
-    // O nome do exame é "canonicalizado" para a descrição oficial cadastrada (via apelidos),
-    // assim os dois arquivos comparados usam o mesmo nome de referência mesmo que os
-    // laboratórios chamem o exame de formas diferentes.
-    paciente: String(extractField(r,['paciente','nome']) ?? '').trim(),
-    exame: canonicalizeExameNome(String(extractField(r,['exame','descricao']) ?? '').trim()),
-    quantidade: Number(extractField(r,['quant','qtd'])) || 1,
-  })).filter(r=>r.paciente || r.exame);
-}
-async function handleComparativoImport(event, lado){
-  if(semPermissao('comparativo')){ event.target.value=''; return; }
-  const file = event.target.files[0];
-  if(!file) return;
-  const data = comparativoDataFor(comparativoTab);
-  const labSelectId = lado==='principal' ? 'cmpLabPrincipal' : 'cmpLabTerc';
-  const labEl = document.getElementById(labSelectId);
-  const labName = labEl ? labEl.value : '';
-  if(!labName){ showToast('Selecione o laboratório antes de importar o arquivo.'); event.target.value=''; return; }
-  const ext = file.name.split('.').pop().toLowerCase();
-  try{
-    let rows = [];
-    if(ext==='csv') rows = await parseCSVFile(file);
-    else if(ext==='xlsx' || ext==='xls') rows = await parseXLSXFile(file);
-    else if(ext==='docx') rows = await parseDOCXFile(file);
-    else if(ext==='txt') rows = await parseTXTFile(file);
-    else { showToast('Formato não suportado. Use .xlsx, .csv, .docx ou .txt.'); event.target.value=''; return; }
-    const parsed = extractComparativoRows(rows);
-    if(parsed.length===0){ showToast('Nenhuma linha com paciente/exame reconhecida no arquivo.'); event.target.value=''; return; }
-    if(lado==='principal'){ data.principalLab = labName; data.principalArquivo = file.name; data.principalRows = parsed; }
-    else { data.tercLab = labName; data.tercArquivo = file.name; data.tercRows = parsed; }
-    render();
-    showToast(`Arquivo importado: ${parsed.length} registro(s) reconhecido(s).`);
-  }catch(err){
-    console.error(err);
-    showToast('Erro ao ler o arquivo: '+err.message);
-  }
-  event.target.value = '';
-}
-function resetComparativoLado(lado){
-  if(semPermissao('comparativo')) return;
-  const data = comparativoDataFor(comparativoTab);
-  if(lado==='principal'){ data.principalLab=''; data.principalArquivo=''; data.principalRows=null; }
-  else { data.tercLab=''; data.tercArquivo=''; data.tercRows=null; }
-  render();
-}
-/* Excluir/limpar de uma vez os dois arquivos importados (Principal e Terceirizado) da aba
-   de convênio/processo atual do Comparativo. Esses dados nunca são gravados em Lançamentos
-   nem em nenhum outro cadastro — por isso limpar aqui não afeta dado algum já registrado
-   no sistema, apenas esvazia a conferência em andamento para permitir reimportar do zero. */
-function limparComparativoTab(){
-  if(semPermissao('comparativo')) return;
-  const data = comparativoDataFor(comparativoTab);
-  if(!data.principalRows && !data.tercRows) return;
-  if(!confirm(`Limpar os arquivos importados do Comparativo na aba ${convenioLabel(comparativoTab)}? Isso não apaga nenhum lançamento nem exame cadastrado — apenas os arquivos importados para esta conferência.`)) return;
-  comparativoState[comparativoTab] = { principalLab:'', principalArquivo:'', principalRows:null, tercLab:'', tercArquivo:'', tercRows:null };
-  render();
-  showToast('Comparação desta aba foi limpa.');
-}
-/* Para cada linha do arquivo TERCEIRIZADO, procura paciente+exame correspondente
-   no arquivo PRINCIPAL. Retorna apenas as inconsistências (não encontrado, ou
-   encontrado com quantidade diferente). */
-function computeComparativoInconsistencias(data){
-  if(!data.principalRows || !data.tercRows) return null;
-  const principalIndex = new Map();
-  data.principalRows.forEach(r=>{
-    const k = normTxt(r.paciente)+'|'+normTxt(r.exame);
-    if(!principalIndex.has(k)) principalIndex.set(k, []);
-    principalIndex.get(k).push(r);
-  });
-  const inconsistencias = [];
-  data.tercRows.forEach(r=>{
-    const k = normTxt(r.paciente)+'|'+normTxt(r.exame);
-    const matches = principalIndex.get(k);
-    if(!matches || matches.length===0){
-      inconsistencias.push({...r, situacao:'NAO_ENCONTRADO', qtdPrincipal:null});
-    } else if(!matches.some(m=>Number(m.quantidade)===Number(r.quantidade))){
-      inconsistencias.push({...r, situacao:'QTD_DIVERGENTE', qtdPrincipal:matches[0].quantidade});
-    }
-  });
-  return inconsistencias;
-}
-function viewComparativo(){
-  if(!STATE.tiposConvenio.find(t=>t.key===comparativoTab)) comparativoTab = STATE.tiposConvenio[0]?.key;
-  const data = comparativoDataFor(comparativoTab);
-  const labsPrincipal = STATE.labs.filter(l=>l.natureza==='PUBLICO');
-  const labsTerc = STATE.labs.filter(l=>l.natureza==='TERCEIRIZADO');
-  const inconsistencias = computeComparativoInconsistencias(data);
-  const optsPrincipal = labsPrincipal.map(l=>`<option value="${esc(l.nome)}" ${data.principalLab===l.nome?'selected':''}>${esc(l.nome)}</option>`).join('');
-  const optsTerc = labsTerc.map(l=>`<option value="${esc(l.nome)}" ${data.tercLab===l.nome?'selected':''}>${esc(l.nome)}</option>`).join('');
-
-  return `
-    <div class="tabs">
-      ${STATE.tiposConvenio.map(c=>`<div class="tab ${comparativoTab===c.key?'active':''}" onclick="setComparativoTab('${c.key}')">${esc(c.label)}</div>`).join('')}
-    </div>
-    <div class="helpbox">
-      <div class="flexrow" style="align-items:flex-start;">
-        <div>
-          Selecione o laboratório <b>Principal (Público)</b> e importe o arquivo dele; depois selecione o laboratório
-          <b>Terceirizado</b> e importe o arquivo dele. O sistema compara Paciente, Exame e Quantidade entre os dois
-          arquivos e lista, sempre com base no arquivo terceirizado, tudo que não foi encontrado (ou está com
-          quantidade diferente) no arquivo do laboratório principal. Esta conferência não é salva em Lançamentos —
-          reimportar um arquivo sempre SUBSTITUI o anterior daquele lado, nunca duplica.
-        </div>
-        ${(data.principalRows || data.tercRows) ? `<button class="btn ghost small edit-only" style="white-space:nowrap;" onclick="limparComparativoTab()">🗑 Limpar comparação desta aba</button>` : ''}
-      </div>
-    </div>
-
-    <div class="grid cols-2">
-      <div class="card">
-        <h2>1) Laboratório Principal (Público)</h2>
-        <div class="subtitle">${esc(convenioLabel(comparativoTab))}</div>
-        ${labsPrincipal.length===0 ? `<div class="helpbox">Nenhum laboratório cadastrado como "Principal (Público)". Cadastre em <b>Laboratórios</b>.</div>` : `
-        <div class="field edit-only" style="margin-bottom:10px;"><label>Laboratório</label><select id="cmpLabPrincipal">
-          <option value="">Selecione…</option>${optsPrincipal}
-        </select></div>
-        <input type="file" id="cmpFilePrincipal" accept=".xlsx,.xls,.csv,.docx,.txt" style="display:none" onchange="handleComparativoImport(event,'principal')">
-        <button class="btn edit-only" onclick="document.getElementById('cmpFilePrincipal').click()">📥 Importar arquivo</button>
-        ${data.principalRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.principalArquivo)}</b> — ${fmtNum(data.principalRows.length)} registro(s) — Laboratório: <b>${esc(data.principalLab)}</b> &nbsp;<button class="btn ghost small edit-only" style="padding:2px 6px;" onclick="resetComparativoLado('principal')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
-        `}
-      </div>
-      <div class="card">
-        <h2>2) Laboratório Terceirizado</h2>
-        <div class="subtitle">${esc(convenioLabel(comparativoTab))}</div>
-        ${labsTerc.length===0 ? `<div class="helpbox">Nenhum laboratório cadastrado como "Terceirizado". Cadastre em <b>Laboratórios</b>.</div>` : `
-        <div class="field edit-only" style="margin-bottom:10px;"><label>Laboratório</label><select id="cmpLabTerc">
-          <option value="">Selecione…</option>${optsTerc}
-        </select></div>
-        <input type="file" id="cmpFileTerc" accept=".xlsx,.xls,.csv,.docx,.txt" style="display:none" onchange="handleComparativoImport(event,'terceirizado')">
-        <button class="btn edit-only" onclick="document.getElementById('cmpFileTerc').click()">📥 Importar arquivo</button>
-        ${data.tercRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.tercArquivo)}</b> — ${fmtNum(data.tercRows.length)} registro(s) — Laboratório: <b>${esc(data.tercLab)}</b> &nbsp;<button class="btn ghost small edit-only" style="padding:2px 6px;" onclick="resetComparativoLado('terceirizado')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
-        `}
-      </div>
-    </div>
-
-    ${!inconsistencias ? '' : renderComparativoReport(data, inconsistencias)}
-  `;
-}
-function renderComparativoReport(data, inconsistencias){
-  const naoEncontrados = inconsistencias.filter(i=>i.situacao==='NAO_ENCONTRADO');
-  const divergentes = inconsistencias.filter(i=>i.situacao==='QTD_DIVERGENTE');
-  return `
-    <div class="card">
-      <div class="flexrow">
-        <div>
-          <h2 style="margin:0;">Relatório de inconsistências</h2>
-          <div class="subtitle" style="margin-bottom:0;">${esc(convenioLabel(comparativoTab))} — Principal: <b>${esc(data.principalLab)}</b> &nbsp;vs&nbsp; Terceirizado: <b>${esc(data.tercLab)}</b></div>
-        </div>
-        <button class="btn secondary small print-btn" onclick="printReport('printComparativo')">🖨️ Imprimir</button>
-      </div>
-      <div id="printComparativo">
-        ${reportHeaderHTML({convenio:convenioLabel(comparativoTab), laboratorio:`${data.principalLab} (principal) vs ${data.tercLab} (terceirizado)`, vigencia:'—', competenciaText:competenciaLabel(STATE.competencia.mes, STATE.competencia.ano)})}
-        <div class="grid cols-3" style="margin-bottom:14px;">
-          <div class="stat"><div class="label">Registros no arquivo terceirizado</div><div class="value">${fmtNum(data.tercRows.length)}</div></div>
-          <div class="stat"><div class="label">Não encontrados no principal</div><div class="value" style="color:var(--red);font-size:20px;">${fmtNum(naoEncontrados.length)}</div></div>
-          <div class="stat"><div class="label">Quantidade divergente</div><div class="value" style="color:#8a5a1c;font-size:20px;">${fmtNum(divergentes.length)}</div></div>
-        </div>
-        ${inconsistencias.length===0 ? `<div class="helpbox">Nenhuma inconsistência encontrada — todos os registros do arquivo terceirizado foram localizados no arquivo principal, com a mesma quantidade.</div>` : `
-        <div class="table-wrap"><table>
-          <thead><tr><th>Paciente</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd (Terceirizado)</th><th class="right">Qtd (Principal)</th><th>Situação</th></tr></thead>
-          <tbody>
-            ${inconsistencias.map(i=>{ const vu = valorUnitPorNomeExame(i.exame); return `<tr>
-              <td>${esc(i.paciente)||'—'}</td>
-              <td class="right">${vu===null?'—':fmtMoney(vu)}</td>
-              <td>${i.exame ? exameCellHTML(null, i.exame) : '—'}</td>
-              <td class="right">${fmtNum(i.quantidade)}</td>
-              <td class="right">${i.qtdPrincipal===null?'—':fmtNum(i.qtdPrincipal)}</td>
-              <td><span class="badge ${i.situacao==='NAO_ENCONTRADO'?'inativo':'terceirizado'}">${i.situacao==='NAO_ENCONTRADO'?'Não encontrado no principal':'Quantidade divergente'}</span></td>
-            </tr>`;}).join('')}
-          </tbody>
-        </table></div>
-        `}
-      </div>
-    </div>
-  `;
-}
-
-/* ---------------- Relatório personalizado (com filtros) ---------------- */
-let customReportState = { lab:'TODOS', convenio:'TODOS', mes:'TODOS', ano:'TODOS', cota:'TODOS', termo:'' };
-let reportSubTab = 'detalhado';
-function crSet(key,val){ customReportState[key]=val; }
-
-/* Todos os lançamentos, do período atual + de todas as competências já fechadas (snapshot) */
-function allLancamentosAllTime(){
-  const hist = STATE.historico.flatMap(h => (h.lancamentos||[]).map(l=>({...l})));
-  return hist.concat(STATE.lancamentos.map(l=>({...l})));
-}
-/* Lançamentos apenas dos laboratórios (ou clínicas/operadoras) do escopo em que o
-   módulo de relatórios está aberto — ver escopoDoLaboratorio(). */
-function lancamentosDoEscopo(){
-  return allLancamentosAllTime().filter(l=>escopoDoLaboratorio(l.laboratorio)===relEscopo);
-}
-function availableLabsInData(){
-  const set = new Set(STATE.labs.filter(l=>escopoDoLaboratorio(l.nome)===relEscopo).map(l=>l.nome));
-  lancamentosDoEscopo().forEach(l=>set.add(l.laboratorio));
-  return Array.from(set).filter(Boolean).sort();
-}
-function availableYearsInData(){
-  const set = new Set(lancamentosDoEscopo().map(l=>l.ano));
-  set.add(STATE.competencia.ano);
-  return Array.from(set).sort((a,b)=>a-b);
-}
-function customReportFiltered(){
-  const f = customReportState;
-  let rows = lancamentosDoEscopo();
-  if(f.lab!=='TODOS') rows = rows.filter(r=>r.laboratorio===f.lab);
-  if(f.convenio!=='TODOS') rows = rows.filter(r=>r.convenio===f.convenio);
-  if(f.mes!=='TODOS') rows = rows.filter(r=>r.competencia===f.mes);
-  if(f.ano!=='TODOS') rows = rows.filter(r=>String(r.ano)===String(f.ano));
-  if(f.termo.trim()){
-    const t = f.termo.toLowerCase();
-    rows = rows.filter(r=> (r.exameDescricao||'').toLowerCase().includes(t) || (r.paciente||'').toLowerCase().includes(t));
-  }
-  rows = rows.map(r=>{
-    let qtdExibida=r.quantidade, valorExibido=r.valorTotal;
-    if(f.cota==='CP'){ qtdExibida=r.qtdCP; valorExibido=r.qtdCP*r.valorUnit; }
-    else if(f.cota==='CR'){ qtdExibida=r.qtdCR; valorExibido=r.qtdCR*r.valorUnit; }
-    return {...r, qtdExibida, valorExibido};
-  });
-  if(f.cota!=='TODOS') rows = rows.filter(r=>r.qtdExibida>0);
-  return rows;
-}
-/* Convênio/Laboratório/Vigência/Competência do relatório personalizado, conforme os filtros ativos */
-function customReportHeaderInfo(){
-  const f = customReportState;
-  const convenioTxt = f.convenio==='TODOS' ? 'Todos os convênios' : convenioLabel(f.convenio);
-  const labTxt = f.lab==='TODOS' ? escopoRotuloTodos() : f.lab;
-  const vigenciaTxt = (f.lab!=='TODOS' && f.convenio!=='TODOS') ? vigenciaFor(f.lab, cadastroValueFor(f.convenio)) : '—';
-  const compTxt = (f.mes!=='TODOS' && f.ano!=='TODOS') ? competenciaLabel(f.mes, f.ano) : 'Todos os períodos';
-  return {convenioTxt, labTxt, vigenciaTxt, compTxt};
-}
-function viewRelatorioPersonalizado(){
-  const f = customReportState;
-  const rows = customReportFiltered();
-  const totQtd = rows.reduce((s,r)=>s+r.qtdExibida,0);
-  const totValor = rows.reduce((s,r)=>s+r.valorExibido,0);
-  const labsOpts = availableLabsInData().map(l=>`<option value="${esc(l)}" ${f.lab===l?'selected':''}>${esc(l)}</option>`).join('');
-  const anosOpts = availableYearsInData().map(a=>`<option value="${a}" ${String(f.ano)===String(a)?'selected':''}>${a}</option>`).join('');
-
-  const {convenioTxt, labTxt, vigenciaTxt, compTxt} = customReportHeaderInfo();
-
-  return `
-  <div class="card">
-    <h2>🧩 Relatório personalizado — ${esc(escopoTituloModulo())}</h2>
-    <div class="subtitle">Monte o relatório do jeito que você precisar: filtre por ${esc(escopoRotuloSingular().toLowerCase())}, tipo de convênio, mês, ano, tipo de cota, ou busque por exame/paciente — funciona também sobre as competências já fechadas.</div>
-    <div class="formgrid" style="grid-template-columns:repeat(6,1fr);">
-      <div class="field"><label>${esc(escopoRotuloSingular())}</label><select onchange="crSet('lab',this.value);render();">
-        <option value="TODOS" ${f.lab==='TODOS'?'selected':''}>Todos</option>${labsOpts}
-      </select></div>
-      <div class="field"><label>Convênio</label><select onchange="crSet('convenio',this.value);render();">
-        <option value="TODOS" ${f.convenio==='TODOS'?'selected':''}>Todos</option>
-        ${STATE.tiposConvenio.map(c=>`<option value="${c.key}" ${f.convenio===c.key?'selected':''}>${esc(c.label)}</option>`).join('')}
-      </select></div>
-      <div class="field"><label>Mês</label><select onchange="crSet('mes',this.value);render();">
-        <option value="TODOS" ${f.mes==='TODOS'?'selected':''}>Todos</option>
-        ${MESES.map(m=>`<option value="${m}" ${f.mes===m?'selected':''}>${m}</option>`).join('')}
-      </select></div>
-      <div class="field"><label>Ano</label><select onchange="crSet('ano',this.value);render();">
-        <option value="TODOS" ${f.ano==='TODOS'?'selected':''}>Todos</option>${anosOpts}
-      </select></div>
-      <div class="field"><label>Tipo de cota</label><select onchange="crSet('cota',this.value);render();">
-        <option value="TODOS" ${f.cota==='TODOS'?'selected':''}>Todas</option>
-        <option value="CP" ${f.cota==='CP'?'selected':''}>Cota Principal</option>
-        <option value="CR" ${f.cota==='CR'?'selected':''}>Cota Reserva</option>
-      </select></div>
-      <div class="field"><label>Buscar exame/paciente</label><input value="${esc(f.termo)}" placeholder="Ex: Hemograma / João" oninput="crSet('termo',this.value);debouncedRender();"></div>
-    </div>
-
-    <div class="tabs" style="margin-top:14px;">
-      <div class="tab ${reportSubTab==='detalhado'?'active':''}" onclick="reportSubTab='detalhado';render();">📄 Detalhado</div>
-      <div class="tab ${reportSubTab==='porExame'?'active':''}" onclick="reportSubTab='porExame';render();">🧾 Por Exame</div>
-      <div class="tab ${reportSubTab==='porPaciente'?'active':''}" onclick="reportSubTab='porPaciente';render();">🙍 Por Paciente</div>
-      <div class="tab ${reportSubTab==='porLab'?'active':''}" onclick="reportSubTab='porLab';render();">🏥 Por ${esc(escopoRotuloSingular())}</div>
-      <div class="tab ${reportSubTab==='porMes'?'active':''}" onclick="reportSubTab='porMes';render();">📅 Por Mês/Competência</div>
-      <div class="tab ${reportSubTab==='porConvenio'?'active':''}" onclick="reportSubTab='porConvenio';render();">📁 Por Convênio</div>
-    </div>
-
-    <div class="flexrow" style="margin:10px 0;">
-      <div class="muted" style="font-size:12px;">${fmtNum(rows.length)} registro(s) encontrados · Qtd: <b>${fmtNum(totQtd)}</b> · Valor: <b>${fmtMoney(totValor)}</b></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn secondary small print-btn" onclick="printReportAsk('printCustomReport','Relatório personalizado — ${esc(escopoTituloModulo())}')">🖨️ Imprimir</button>
-        <button class="btn secondary small" onclick="${reportSubTab==='porExame'?'exportPorExameXLSX()':'exportCustomReportCSV()'}">⭳ Exportar ${reportSubTab==='porExame'?'XLSX':'CSV'}</button>
-      </div>
-    </div>
-
-    <div id="printCustomReport">
-      ${reportHeaderHTML({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt, rotuloLaboratorio:escopoRotuloSingular()})}
-      ${renderCustomReportTable(rows)}
-    </div>
-  </div>`;
-}
-function groupKeyFn(){
-  if(reportSubTab==='porExame') return r=>resolveExameAtual(r.exameId, r.exameDescricao).nome || '(sem exame)';
-  if(reportSubTab==='porPaciente') return r=>r.paciente||'(sem paciente)';
-  if(reportSubTab==='porLab') return r=>r.laboratorio||'(sem laboratório)';
-  if(reportSubTab==='porMes') return r=>r.competencia+'/'+r.ano;
-  if(reportSubTab==='porConvenio') return r=>convenioLabel(r.convenio);
-  return null;
-}
-function groupColLabel(){
-  return {porExame:'Exame', porPaciente:'Paciente', porLab:escopoRotuloSingular(), porMes:'Competência', porConvenio:'Convênio'}[reportSubTab] || '';
-}
-function round2(v){ return Math.round((v + Number.EPSILON) * 100) / 100; }
-function groupRows(rows){
-  const keyFn = groupKeyFn();
-  const map = new Map();
-  rows.forEach(r=>{
-    const k = keyFn(r);
-    if(!map.has(k)) map.set(k,{qtd:0,qtdCP:0,qtdCR:0,valor:0,registros:0,apelidos:(reportSubTab==='porExame'?(resolveExameAtual(r.exameId, r.exameDescricao).apelidos||[]):[])});
-    const g = map.get(k);
-    g.qtd+=r.qtdExibida; g.qtdCP+=r.qtdCP; g.qtdCR+=r.qtdCR; g.valor+=r.valorExibido; g.registros++;
-  });
-  const list = Array.from(map.entries()).map(([chave,v])=>({chave,...v}));
-  // No relatório "Por Exame", o valor de cada cota é rateado proporcionalmente sobre
-  // o valor total do grupo, usando a Qtd C.P./Qtd C.R. REAL já somada acima (linha
-  // "g.qtdCP+=r.qtdCP; g.qtdCR+=r.qtdCR"), que reflete a cota de cada exame conforme
-  // configurado em "Tipos de Convênio/Processo" — nunca uma proporção fixa.
-  if(reportSubTab==='porExame'){
-    list.forEach(g=>{
-      const avgUnit = g.qtd>0 ? (g.valor/g.qtd) : 0;
-      g.valorUnitMedio = avgUnit;
-      g.valorCP = round2(g.qtdCP*avgUnit);
-      g.valorCR = round2(g.valor - g.valorCP); // resto, garante soma exata com o total
-    });
-  }
-  return list.sort((a,b)=>b.valor-a.valor);
-}
-function renderCustomReportTable(rows){
-  if(rows.length===0) return `<div class="helpbox">Nenhum registro encontrado para os filtros selecionados.</div>`;
-  if(reportSubTab==='detalhado'){
-    const dTotQtd = rows.reduce((s,r)=>s+r.qtdExibida,0);
-    const dTotCP  = rows.reduce((s,r)=>s+(Number(r.qtdCP)||0),0);
-    const dTotCR  = rows.reduce((s,r)=>s+(Number(r.qtdCR)||0),0);
-    const dTotVal = rows.reduce((s,r)=>s+r.valorExibido,0);
-    return `<div class="table-wrap"><table>
-      <thead><tr><th>Competência</th><th>Convênio</th><th>${esc(escopoRotuloSingular())}</th><th>Paciente</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
-      <tbody>${rows.map(r=>`<tr>
-        <td>${esc(r.competencia)}/${esc(r.ano)}</td><td><span class="badge ${convenioBadge(r.convenio)}">${convenioLabel(r.convenio)}</span></td>
-        <td>${esc(r.laboratorio)}</td><td>${esc(r.paciente)}</td><td class="right">${fmtMoney(r.valorUnit)}</td><td>${exameCellHTML(r.exameId, r.exameDescricao)}</td>
-        <td class="right">${fmtNum(r.qtdExibida)}</td><td class="right">${fmtNum(r.qtdCP)}</td><td class="right">${fmtNum(r.qtdCR)}</td>
-        <td class="right"><b>${fmtMoney(r.valorExibido)}</b></td>
-      </tr>`).join('')}</tbody>
-      <tfoot><tr>
-        <td colspan="6"><b>SOMA TOTAL — ${fmtNum(rows.length)} registro(s)</b></td>
-        <td class="right"><b>${fmtNum(dTotQtd)}</b></td>
-        <td class="right"><b>${fmtNum(dTotCP)}</b></td>
-        <td class="right"><b>${fmtNum(dTotCR)}</b></td>
-        <td class="right"><b>${fmtMoney(dTotVal)}</b></td>
-      </tr></tfoot>
-    </table></div>`;
-  }
-  const list = groupRows(rows);
-  if(reportSubTab==='porExame'){
-    // Layout igual ao modelo de planilha: Exame | Registros | Qtd | Qtd C.P. | Valor C.P. | Qtd C.R. | Valor C.R. | Valor Total
-    const totRegistros = list.reduce((s,g)=>s+g.registros,0);
-    const totQtd = list.reduce((s,g)=>s+g.qtd,0);
-    const totQtdCP = list.reduce((s,g)=>s+g.qtdCP,0);
-    const totValorCP = list.reduce((s,g)=>s+g.valorCP,0);
-    const totQtdCR = list.reduce((s,g)=>s+g.qtdCR,0);
-    const totValorCR = list.reduce((s,g)=>s+g.valorCR,0);
-    const totValor = list.reduce((s,g)=>s+g.valor,0);
-    return `<div class="table-wrap"><table>
-      <thead><tr><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Valor C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor C.R.</th><th class="right">Valor Total</th></tr></thead>
-      <tbody>${list.map(g=>`<tr>
-        <td class="right">${fmtMoney(g.valorUnitMedio||0)}</td><td><b>${esc(g.chave)}</b>${g.apelidos&&g.apelidos.length?`<div class="apelido-mini">${esc(g.apelidos.join(', '))}</div>`:''}</td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td>
-        <td class="right">${fmtNum(g.qtdCP)}</td><td class="right">${fmtMoney(g.valorCP)}</td>
-        <td class="right">${fmtNum(g.qtdCR)}</td><td class="right">${fmtMoney(g.valorCR)}</td>
-        <td class="right"><b>${fmtMoney(g.valor)}</b></td>
-      </tr>`).join('')}</tbody>
-      <tfoot><tr>
-        <td></td><td>TOTAL</td><td class="right">${fmtNum(totRegistros)}</td><td class="right">${fmtNum(totQtd)}</td>
-        <td class="right">${fmtNum(totQtdCP)}</td><td class="right">${fmtMoney(totValorCP)}</td>
-        <td class="right">${fmtNum(totQtdCR)}</td><td class="right">${fmtMoney(totValorCR)}</td>
-        <td class="right">${fmtMoney(totValor)}</td>
-      </tr></tfoot>
-    </table></div>`;
-  }
-  /* Soma total do agrupamento — aparece na tela e também na impressão do relatório
-     (abas "Por Paciente", "Por Laboratório/Clínicas", "Por Mês/Competência" e "Por Convênio"). */
-  const gTotRegistros = list.reduce((s,g)=>s+g.registros,0);
-  const gTotQtd   = list.reduce((s,g)=>s+g.qtd,0);
-  const gTotCP    = list.reduce((s,g)=>s+g.qtdCP,0);
-  const gTotCR    = list.reduce((s,g)=>s+g.qtdCR,0);
-  const gTotValor = list.reduce((s,g)=>s+g.valor,0);
-  const gAvgUnit  = gTotQtd>0 ? (gTotValor/gTotQtd) : 0;
-  return `<div class="table-wrap"><table>
-    <thead><tr><th class="right">Vlr. Unit. (méd.)</th><th>${groupColLabel()}</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
-    <tbody>${list.map(g=>{ const avgUnit = g.qtd>0 ? (g.valor/g.qtd) : 0; return `<tr><td class="right">${fmtMoney(avgUnit)}</td><td><b>${esc(g.chave)}</b></td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td><td class="right">${fmtNum(g.qtdCP)}</td><td class="right">${fmtNum(g.qtdCR)}</td><td class="right"><b>${fmtMoney(g.valor)}</b></td></tr>`; }).join('')}</tbody>
-    <tfoot><tr>
-      <td class="right">${fmtMoney(gAvgUnit)}</td>
-      <td><b>SOMA TOTAL — ${fmtNum(list.length)} linha(s)</b></td>
-      <td class="right"><b>${fmtNum(gTotRegistros)}</b></td>
-      <td class="right"><b>${fmtNum(gTotQtd)}</b></td>
-      <td class="right"><b>${fmtNum(gTotCP)}</b></td>
-      <td class="right"><b>${fmtNum(gTotCR)}</b></td>
-      <td class="right"><b>${fmtMoney(gTotValor)}</b></td>
-    </tr></tfoot>
-  </table></div>`;
-}
-function exportCustomReportCSV(){
-  const rows = customReportFiltered();
-  if(rows.length===0){ showToast('Nada para exportar.'); return; }
-  const {convenioTxt, labTxt, vigenciaTxt, compTxt} = customReportHeaderInfo();
-  const headerBlock = csvHeaderBlock({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt, rotuloLaboratorio:escopoRotuloSingular()});
-  let dataLines;
-  if(reportSubTab==='detalhado'){
-    const header = ['Competencia','Ano','Convenio', relEscopo==='IMAGEM'?'Clinica/Operadora':'Laboratorio','Paciente','Exame','Qtd','QtdCP','QtdCR','ValorUnit','ValorTotal'];
-    const rowLines = rows.map(r=>[
-      csvEsc(r.competencia), r.ano, csvEsc(convenioLabel(r.convenio)), csvEsc(r.laboratorio), csvEsc(r.paciente), csvEsc(r.exameDescricao),
-      r.qtdExibida, r.qtdCP, r.qtdCR, csvEsc(fmtMoney(r.valorUnit)), csvEsc(fmtMoney(r.valorExibido))
-    ].join(';'));
-    const totalRow = ['TOTAL','','','','','',
-      rows.reduce((s,r)=>s+r.qtdExibida,0), rows.reduce((s,r)=>s+r.qtdCP,0), rows.reduce((s,r)=>s+r.qtdCR,0),
-      '', csvEsc(fmtMoney(rows.reduce((s,r)=>s+r.valorExibido,0)))
-    ].join(';');
-    dataLines = [header.join(';')].concat(rowLines).concat([totalRow]);
-  } else {
-    const list = groupRows(rows);
-    const header = [groupColLabel(),'Registros','Qtd','QtdCP','QtdCR','ValorTotal'];
-    const rowLines = list.map(g=>[csvEsc(g.chave), g.registros, g.qtd, g.qtdCP, g.qtdCR, csvEsc(fmtMoney(g.valor))].join(';'));
-    const totalRow = ['TOTAL',
-      list.reduce((s,g)=>s+g.registros,0), list.reduce((s,g)=>s+g.qtd,0), list.reduce((s,g)=>s+g.qtdCP,0), list.reduce((s,g)=>s+g.qtdCR,0),
-      csvEsc(fmtMoney(list.reduce((s,g)=>s+g.valor,0)))
-    ].join(';');
-    dataLines = [header.join(';')].concat(rowLines).concat([totalRow]);
-  }
-  const lines = headerBlock.concat(dataLines);
-  const blob = new Blob(['\uFEFF'+lines.join('\n')], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download=`relatorio_personalizado_${relEscopo==='IMAGEM'?'imagem_':''}${reportSubTab}.csv`; a.click();
-  URL.revokeObjectURL(url);
-}
-
-/* Remove acentos e espaços para compor nomes de arquivo, ex.: "Compra Direta" -> "COMPRA_DIRETA" */
-function slugPart(s){
-  return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,'_');
-}
-function buildPorExameFilename(){
-  const f = customReportState;
-  const convPart = f.convenio==='TODOS' ? 'TODOS_OS_CONVENIOS' : slugPart(convenioLabel(f.convenio));
-  const labPart = f.lab==='TODOS' ? slugPart(escopoRotuloTodos()) : slugPart(f.lab);
-  const compPart = (f.mes!=='TODOS' && f.ano!=='TODOS') ? `${slugPart(f.mes)}_${f.ano}` : 'TODOS_OS_PERIODOS';
-  return `${convPart}_-_${labPart}_-_${compPart}_-_POR_EXAME.xlsx`;
-}
-
-/* Exporta o relatório "Por Exame" em .xlsx formatado, seguindo o modelo de planilha padrão:
-   cabeçalho com Prefeitura/Convênio/Laboratório/Vigência/Competência, tabela com Exame,
-   Registros, Qtd, Qtd C.P., Valor C.P., Qtd C.R., Valor C.R. e Valor Total, e linha de TOTAL. */
-async function exportPorExameXLSX(){
-  const rows = customReportFiltered();
-  if(rows.length===0){ showToast('Nada para exportar.'); return; }
-  if(typeof ExcelJS==='undefined'){ showToast('Biblioteca de exportação XLSX não carregou. Verifique sua conexão e tente novamente.'); return; }
-
-  // Garante que os grupos tragam valorCP/valorCR calculados (a partir da Qtd C.P./C.R. real
-  // de cada lançamento), independente de qual aba esteja ativa no momento do clique.
-  const savedTab = reportSubTab;
-  reportSubTab = 'porExame';
-  const list = groupRows(rows);
-  reportSubTab = savedTab;
-
-  const {convenioTxt, labTxt, vigenciaTxt, compTxt} = customReportHeaderInfo();
-
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Por Exame');
-  ws.columns = [{width:40},{width:12},{width:10},{width:10},{width:12},{width:10},{width:12},{width:14}];
-
-  const grayFill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFD9D9D9'} };
-  const boldFont = { name:'Arial', size:11, bold:true };
-  const normalFont = { name:'Arial', size:10 };
-  const thin = { style:'thin', color:{argb:'FFBFBFBF'} };
-  const allBorders = { top:thin, bottom:thin, left:thin, right:thin };
-  const moneyFmt = '"R$"\\ #,##0.00';
-
-  ws.mergeCells('A1:D1');
-  ws.getCell('A1').value = PREFEITURA_NOME;
-  ws.getCell('A1').font = boldFont;
-
-  [['Convênio',convenioTxt],[escopoRotuloSingular(),labTxt],['Vigência',vigenciaTxt],['Competência',compTxt]].forEach((pair,i)=>{
-    const r = i+2;
-    ws.getCell(`A${r}`).value = pair[0]; ws.getCell(`A${r}`).font = boldFont;
-    ws.getCell(`B${r}`).value = pair[1]; ws.getCell(`B${r}`).font = boldFont;
-  });
-
-  const headerRowIdx = 7;
-  ['Exame','Registros','Qtd','QtdCP','Valor','QtdCR','Valor','ValorTotal'].forEach((h,i)=>{
-    const cell = ws.getCell(headerRowIdx, i+1);
-    cell.value = h; cell.font = boldFont; cell.fill = grayFill;
-    cell.alignment = { horizontal:'center' }; cell.border = allBorders;
-  });
-
-  let r = headerRowIdx+1;
-  list.forEach(g=>{
-    const vals = [g.chave, g.registros, g.qtd, g.qtdCP, g.valorCP, g.qtdCR, g.valorCR, g.valor];
-    vals.forEach((v,i)=>{
-      const cell = ws.getCell(r, i+1);
-      cell.value = v; cell.font = normalFont; cell.border = allBorders;
-      cell.alignment = { horizontal: i===0 ? 'left' : ([4,6,7].includes(i) ? 'right' : 'center') };
-      if(i===4||i===6||i===7) cell.numFmt = moneyFmt;
-    });
-    r++;
-  });
-
-  const totalVals = ['TOTAL',
-    list.reduce((s,g)=>s+g.registros,0), list.reduce((s,g)=>s+g.qtd,0),
-    list.reduce((s,g)=>s+g.qtdCP,0), list.reduce((s,g)=>s+g.valorCP,0),
-    list.reduce((s,g)=>s+g.qtdCR,0), list.reduce((s,g)=>s+g.valorCR,0),
-    list.reduce((s,g)=>s+g.valor,0)
-  ];
-  totalVals.forEach((v,i)=>{
-    const cell = ws.getCell(r, i+1);
-    cell.value = v; cell.font = boldFont; cell.fill = grayFill; cell.border = allBorders;
-    cell.alignment = { horizontal: i===0 ? 'left' : ([4,6,7].includes(i) ? 'right' : 'center') };
-    if(i===4||i===6||i===7) cell.numFmt = moneyFmt;
-  });
-
-  try{
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download = buildPorExameFilename(); a.click();
-    URL.revokeObjectURL(url);
-  }catch(err){
-    console.error(err);
-    showToast('Erro ao gerar o arquivo XLSX.');
-  }
-}
-
-/* ---------------- Competência editor ---------------- */
-function openCompetenciaEditor(){
-  if(!isMaster()){ showToast('Apenas o administrador pode alterar a competência atual.'); return; }
-  const mes = prompt('Mês da competência atual:', STATE.competencia.mes);
-  if(!mes) return;
-  const mesUpper = mes.toUpperCase().trim();
-  if(!MESES.includes(mesUpper)){ showToast('Mês inválido. Use: '+MESES.join(', ')); return; }
-  const ano = prompt('Ano da competência atual:', STATE.competencia.ano);
-  if(!ano || isNaN(Number(ano))) return;
-  STATE.competencia = { mes: mesUpper, ano: Number(ano) };
-  saveState(); render(); showToast('Competência atualizada.');
-}
-
-/* ---------------- Backup: Exportar / Importar todos os dados ---------------- */
-function exportAllData(){
-  const payload = {
-    _tipo: 'backup-controle-exames-laboratoriais',
-    _exportadoEm: new Date().toISOString(),
-    dados: STATE
-  };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const dataAtual = new Date().toISOString().slice(0,10);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `backup_controle_exames_${dataAtual}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('Backup exportado! Guarde este arquivo para importar em uma próxima versão.');
-}
-function importAllData(event){
-  if(!isMaster()){ showToast('Apenas o administrador pode restaurar um backup completo.'); event.target.value=''; return; }
-  const file = event.target.files[0];
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = function(e){
-    let payload;
-    try{
-      payload = JSON.parse(e.target.result);
-    }catch(err){
-      alert('Não foi possível ler este arquivo. Verifique se é um backup exportado por este sistema (.json).');
-      event.target.value = '';
-      return;
-    }
-    const dados = payload && payload.dados ? payload.dados : payload;
-    if(!dados || (!dados.labs && !dados.exames && !dados.lancamentos)){
-      alert('Este arquivo não parece ser um backup válido do Controle de Exames Laboratoriais/Exames de Imagem.');
-      event.target.value = '';
-      return;
-    }
-    const temDadosAtuais = (STATE.labs && STATE.labs.length) || (STATE.exames && STATE.exames.length) || (STATE.lancamentos && STATE.lancamentos.length);
-    if(temDadosAtuais){
-      if(!confirm('Já existem dados cadastrados nesta versão. Importar o backup vai SUBSTITUIR todos os dados atuais pelos dados do arquivo. Deseja continuar?')) {
-        event.target.value = '';
-        return;
-      }
-    }
-    STATE = Object.assign({}, STATE, dados);
-    garantirTiposConvenio();
-    saveState();
-    renderNav();
-    render();
-    event.target.value = '';
-    showToast('Dados importados com sucesso!');
-  };
-  reader.readAsText(file);
-}
-
-/* ============================================================
-   CADASTRO DE USUÁRIOS (módulo do administrador/master)
-   ============================================================ */
-let editingUsuarioId = null;
-function viewUsuarios(){
-  if(!isMaster()) return `<div class="card">Acesso restrito ao administrador do sistema.</div>`;
-  const editing = editingUsuarioId ? USERS_STATE.usuarios.find(u=>u.id===editingUsuarioId) : null;
-  const solicitacoes = (USERS_STATE.solicitacoesSenha||[]).slice().reverse();
-  return `
-    <div class="card">
-      <h2>${editing ? '✏️ Editar usuário' : 'Novo usuário'}</h2>
-      <div class="subtitle">${editing ? 'Deixe a senha em branco para manter a senha atual. A nova senha não pode ser igual à anterior.' : 'Cadastre um novo usuário para acessar o sistema.'}</div>
-      <div class="formgrid">
-        <div class="field"><label>Usuário (login)</label><input id="usrUsuario" placeholder="Ex: maria" value="${editing?esc(editing.usuario):''}" ${editing?'disabled':''}></div>
-        <div class="field"><label>Nome completo</label><input id="usrNome" placeholder="Ex: Maria Silva" value="${editing?esc(editing.nome):''}"></div>
-        <div class="field"><label>E-mail</label><input id="usrEmail" type="email" placeholder="Ex: maria@jaborandi.sp.gov.br" value="${editing?esc(editing.email||''):''}"></div>
-        <div class="field"><label>Senha</label><input id="usrSenha" type="password" placeholder="${editing?'(manter atual)':'Digite a senha'}"></div>
-        <div class="field"><label>Perfil</label><select id="usrPerfil">
-          <option value="comum" ${editing && editing.perfil==='comum'?'selected':''}>Usuário comum (vê e imprime tudo, não insere dados)</option>
-          <option value="digitador" ${editing && editing.perfil==='digitador'?'selected':''}>Usuário (digitador) — insere dados em Lançar Exames, N.F. e Comparativo</option>
-          <option value="master" ${editing && editing.perfil==='master'?'selected':''}>Administrador (master) — acesso total</option>
-        </select></div>
-      </div>
-      <div class="helpbox" style="margin-top:6px;">✉️ Cadastre o e-mail dos administradores para receberem os pedidos de "Esqueci minha senha" enviados pela tela de login.</div>
-      <div style="margin-top:14px;display:flex;gap:8px;">
-        ${editing
-          ? `<button class="btn" onclick="saveUsuario()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditUsuario()">Cancelar</button>`
-          : `<button class="btn" onclick="saveUsuario()">+ Adicionar usuário</button>`}
-      </div>
-    </div>
-    <div class="card">
-      <h2>Usuários cadastrados</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Usuário</th><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-          ${USERS_STATE.usuarios.length===0 ? `<tr class="empty-row"><td colspan="6">Nenhum usuário cadastrado.</td></tr>` :
-            USERS_STATE.usuarios.map(u=>`
-            <tr>
-              <td><b>${esc(u.usuario)}</b></td>
-              <td>${esc(u.nome)||'—'}</td>
-              <td>${esc(u.email)||'—'}</td>
-              <td>${u.perfil==='master'?'<span class="badge ativo">Administrador</span>':u.perfil==='digitador'?'<span class="badge terceirizado">Digitador</span>':'<span class="badge naoinformado">Usuário comum</span>'}</td>
-              <td>${u.bloqueado?'<span class="badge inativo">Bloqueado</span>':'<span class="badge ativo">Ativo</span>'}</td>
-              <td>
-                <button class="btn ghost small" onclick="editUsuario('${u.id}')">✏️ editar</button>
-                ${u.bloqueado?`<button class="btn ghost small" onclick="desbloquearUsuario('${u.id}')">🔓 desbloquear</button>`:''}
-                <button class="btn ghost small" onclick="deleteUsuario('${u.id}')">🗑 excluir</button>
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table></div>
-    </div>
-    <div class="card">
-      <h2>Solicitações de nova senha ("Esqueci minha senha")</h2>
-      <div class="subtitle">Pedidos enviados pela tela de login. Por segurança, a senha anterior nunca fica visível — cadastre uma senha nova para o usuário acima.</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Usuário</th><th>Nome</th><th>Perfil</th><th>Data/Hora do pedido</th><th></th></tr></thead>
-        <tbody>
-          ${solicitacoes.length===0 ? `<tr class="empty-row"><td colspan="5">Nenhuma solicitação registrada.</td></tr>` :
-            solicitacoes.map(s=>`
-            <tr>
-              <td><b>${esc(s.usuario)}</b></td>
-              <td>${esc(s.nome)}</td>
-              <td>${esc(s.perfil)}</td>
-              <td>${esc(s.dataHora)}</td>
-              <td><button class="btn ghost small" onclick="removerSolicitacaoSenha('${s.id}')">✔ marcar como atendida</button></td>
-            </tr>`).join('')}
-        </tbody>
-      </table></div>
-    </div>
-  `;
-}
-async function saveUsuario(){
-  if(!isMaster()) return;
-  const usuarioRaw = document.getElementById('usrUsuario').value.trim().toLowerCase();
-  const nome = document.getElementById('usrNome').value.trim();
-  const email = document.getElementById('usrEmail').value.trim();
-  const senha = document.getElementById('usrSenha').value;
-  const perfil = document.getElementById('usrPerfil').value;
-  if(editingUsuarioId){
-    const u = USERS_STATE.usuarios.find(x=>x.id===editingUsuarioId);
-    if(!u){ editingUsuarioId=null; render(); return; }
-    if(senha){
-      const novoHash = await hashSenha(senha);
-      if(novoHash===u.senhaHash){ showToast('A nova senha não pode ser igual à senha anterior.'); return; }
-      u.senhaHash = novoHash;
-    }
-    u.nome = nome;
-    u.email = email;
-    u.perfil = perfil;
-    u.master = (perfil==='master'); // mantido só por compatibilidade com versões antigas
-    editingUsuarioId = null;
-    saveUsersState(true); render(); showToast('Usuário atualizado.','success');
-  } else {
-    if(!usuarioRaw || usuarioRaw.length<3){ showToast('Informe um usuário (login) com pelo menos 3 caracteres.'); return; }
-    if(!senha || senha.length<4){ showToast('Informe uma senha com pelo menos 4 caracteres.'); return; }
-    if(USERS_STATE.usuarios.some(u=>u.usuario===usuarioRaw)){ showToast('Já existe um usuário com esse login.'); return; }
-    const senhaHash = await hashSenha(senha);
-    USERS_STATE.usuarios.push({ id: uid(), usuario:usuarioRaw, nome, email, perfil, master:(perfil==='master'), senhaHash, bloqueado:false, criadoEm:new Date().toISOString() });
-    saveUsersState(true); render(); showToast('Usuário adicionado.','success');
-  }
-}
-function editUsuario(id){
-  editingUsuarioId = id;
-  render();
-}
-function cancelEditUsuario(){
-  editingUsuarioId = null;
-  render();
-}
-function deleteUsuario(id){
-  const u = USERS_STATE.usuarios.find(x=>x.id===id);
-  if(!u) return;
-  if(u.usuario==='joao'){ showToast('O usuário administrador principal (joao) não pode ser excluído.'); return; }
-  if(!confirm(`Excluir o usuário "${u.usuario}"? Ele não poderá mais acessar o sistema.`)) return;
-  USERS_STATE.usuarios = USERS_STATE.usuarios.filter(x=>x.id!==id);
-  if(editingUsuarioId===id) editingUsuarioId = null;
-  saveUsersState(true); render();
-}
-function desbloquearUsuario(id){
-  const u = USERS_STATE.usuarios.find(x=>x.id===id);
-  if(!u) return;
-  u.bloqueado = false;
-  limparTentativasLogin(u.usuario);
-  saveUsersState(true); render(); showToast('Usuário desbloqueado.','success');
-}
-function removerSolicitacaoSenha(id){
-  if(!Array.isArray(USERS_STATE.solicitacoesSenha)) return;
-  USERS_STATE.solicitacoesSenha = USERS_STATE.solicitacoesSenha.filter(s=>s.id!==id);
-  saveUsersState(true); render();
-}
-
-/* ============================================================
-   LOG DE ACESSO (módulo do administrador/master)
-   ============================================================ */
-function viewLogAcesso(){
-  if(!isMaster()) return `<div class="card">Acesso restrito ao administrador do sistema.</div>`;
-  const logs = USERS_STATE.logs.slice().reverse();
-  return `
-    <div class="card">
-      <h2>📜 Log de Acesso</h2>
-      <div class="subtitle">Registro de quem usou o sistema: usuário, data, hora de início, hora final e os módulos/comandos acessados em cada sessão.</div>
-      <div class="table-wrap" style="max-height:600px;"><table>
-        <thead><tr><th>Usuário</th><th>Data</th><th>Hora Início</th><th>Hora Final</th><th>Comandos acessados</th></tr></thead>
-        <tbody>
-          ${logs.length===0 ? `<tr class="empty-row"><td colspan="5">Nenhum acesso registrado ainda.</td></tr>` :
-            logs.map(l=>`
-            <tr>
-              <td><b>${esc(l.nomeUsuario||l.usuario)}</b></td>
-              <td>${esc(l.data)}</td>
-              <td>${esc(l.horaInicio)}</td>
-              <td>${esc(l.horaFinal)||'—'}</td>
-              <td style="white-space:normal;min-width:260px;">${(l.comandos&&l.comandos.length) ? esc(l.comandos.join(' → ')) : '—'}</td>
-            </tr>`).join('')}
-        </tbody>
-      </table></div>
-    </div>
-  `;
-}
-
-/* ---------------- Boot ---------------- */
-function toggleSidebarMobile(forceClose){
-  const sb = document.getElementById('sidebar');
-  const bd = document.getElementById('sidebarBackdrop');
-  const willOpen = forceClose ? false : !sb.classList.contains('open');
-  sb.classList.toggle('open', willOpen);
-  bd.classList.toggle('open', willOpen);
-}
-document.getElementById('menuBtn').addEventListener('click', ()=> toggleSidebarMobile());
-document.getElementById('sidebarBackdrop').addEventListener('click', ()=> toggleSidebarMobile(true));
-
-async function bootAfterAccessCode(){
-  await loadState();
-  document.getElementById('loadingScreen').style.display = 'none';
-  document.getElementById('app').style.display = 'flex';
-  goto('dashboard');
-}
-
-async function iniciarComLogin(){
-  await loadUsersState();
-  document.getElementById('loadingScreen').style.display = 'none';
-  let usuarioSalvo = null;
-  try{ usuarioSalvo = sessionStorage.getItem('cel_logged_user'); }catch(e){}
-  if(usuarioSalvo){
-    const u = USERS_STATE.usuarios.find(x=>x.usuario===usuarioSalvo);
-    if(u){ iniciarSessaoUsuario(u); return; }
-  }
-  document.getElementById('loginScreen').style.display = 'flex';
-}
-
-/* ============================================================
-   ATALHOS DE TECLADO
-   Alt+1..Alt+9 — navega pelos módulos na ordem do menu
-   Alt+D — Dashboard · Alt+L — Lançar Exames · Alt+F — Emissão NF
-   Alt+R — Relatórios · Esc — fechar sidebar no mobile
-   ============================================================ */
-const ATALHOS_MODULO = {
-  '1':'dashboard','2':'labs','3':'exames','4':'tiposConvenio',
-  '5':'comparativo','6':'lancamento','7':'nf','8':'relatorios',
-  'd':'dashboard','l':'lancamento','f':'nf','r':'relatorios','u':'usuarios'
-};
-document.addEventListener('keydown', function(e){
-  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||e.target.tagName==='TEXTAREA') return;
-  if(e.altKey && ATALHOS_MODULO[e.key]){
-    e.preventDefault();
-    const mod = ATALHOS_MODULO[e.key];
-    if((mod==='usuarios'||mod==='logAcesso') && !isMaster()) return;
-    goto(mod);
-  }
-  if(e.key==='Escape'){
-    toggleSidebarMobile(true);
-  }
-});
-
-/* ============================================================
-   LOADING SCREEN MELHORADO
-   ============================================================ */
-(function init(){
-  if(!firebaseOk){
-    document.getElementById('loadingScreen').style.display = 'none';
-    document.getElementById('configScreen').style.display = 'flex';
-    return;
-  }
-  iniciarComLogin();
-})();
-</script>
-</body>
-</html>
+let comparativoState = {}; // { [tipoKey]: {principalLab, principa
