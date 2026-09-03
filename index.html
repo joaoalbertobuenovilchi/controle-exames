@@ -272,6 +272,31 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 /* Marca de data/hora exibida apenas na impressão */
 .print-timestamp{display:none;}
 
+/* ---------------- Caixa de escolha da orientação da impressão ---------------- */
+.print-orient-backdrop{position:fixed;inset:0;background:rgba(8,32,32,.45);z-index:400;display:none;align-items:center;justify-content:center;padding:20px;}
+.print-orient-backdrop.open{display:flex;}
+.print-orient-box{background:#fff;border-radius:14px;max-width:430px;width:100%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.25);}
+.print-orient-box h3{margin:0 0 4px;font-size:16px;}
+.print-orient-box .po-sub{font-size:12px;color:var(--ink-soft);margin-bottom:16px;}
+.print-orient-opts{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.po-opt{border:1.5px solid var(--line);border-radius:12px;padding:14px 10px;text-align:center;cursor:pointer;background:#fff;transition:all .12s;}
+.po-opt:hover{border-color:var(--teal);background:var(--teal-soft);}
+.po-opt .po-ico{display:block;margin:0 auto 8px;border:2px solid var(--teal);border-radius:3px;background:var(--teal-soft);}
+.po-opt .po-ico.retrato{width:30px;height:42px;}
+.po-opt .po-ico.paisagem{width:42px;height:30px;}
+.po-opt b{display:block;font-size:13px;}
+.po-opt span{display:block;font-size:11px;color:var(--ink-soft);margin-top:2px;}
+
+/* Etiqueta de numeração do relatório de glosas (ex.: 001.08.2026) */
+.glosa-num{display:inline-block;font-family:ui-monospace,Consolas,monospace;font-weight:700;letter-spacing:.04em;background:var(--teal-soft);color:var(--teal-dark);border-radius:6px;padding:2px 8px;font-size:12px;}
+.glosa-report-num{text-align:center;font-family:ui-monospace,Consolas,monospace;font-weight:700;letter-spacing:.06em;font-size:13px;color:var(--teal-dark);margin:-6px 0 10px;}
+.status-pill{display:inline-block;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;white-space:nowrap;}
+.status-pill.st-preench{background:#EEF2F5;color:#5A6B72;}
+.status-pill.st-analise{background:#FFF4DE;color:#9A6B00;}
+.status-pill.st-enviado{background:#E3F2F1;color:#0B6E6E;}
+.status-pill.st-deferido{background:#E4F6E9;color:#1B7A3E;}
+.status-pill.st-indeferido{background:#FDE7E7;color:#B02A2A;}
+
 /* ---------------- Impressão (A4 paisagem) ---------------- */
 @media print{
   /* Tamanho A4, uma única face. Sem orientação forçada: o usuário escolhe
@@ -297,6 +322,7 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
   .print-target .grid > *{ margin-bottom:14px; break-inside:avoid; }
   .print-target .card .flexrow .btn{ display:none !important; }
   .print-target .chartbox{ height:220px; }
+  .print-orient-backdrop{ display:none !important; }
 }
 </style>
 </head>
@@ -400,6 +426,26 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
     </div>
     <div id="view"></div>
   </main>
+</div>
+
+<!-- Caixa que pergunta a orientação do papel na hora de imprimir um relatório.
+     Fica fora da <div id="view">, que é reescrita a cada render(). -->
+<div class="print-orient-backdrop" id="printOrientDialog" onclick="if(event.target===this) printOrientCancel();">
+  <div class="print-orient-box">
+    <h3>🖨️ Como deseja imprimir?</h3>
+    <div class="po-sub" id="printOrientTitulo">Relatório</div>
+    <div class="print-orient-opts">
+      <div class="po-opt" onclick="printOrientGo('portrait')">
+        <i class="po-ico retrato"></i><b>Retrato</b><span>A4 em pé</span>
+      </div>
+      <div class="po-opt" onclick="printOrientGo('landscape')">
+        <i class="po-ico paisagem"></i><b>Paisagem</b><span>A4 deitado — cabem mais colunas</span>
+      </div>
+    </div>
+    <div style="margin-top:16px;text-align:right;">
+      <button class="btn secondary small" onclick="printOrientCancel()">Cancelar</button>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -769,6 +815,7 @@ let STATE = {
   glosaJustificativas: [],    // justificativas das glosas
   glosaPlanoAcao: [],         // plano de ação: CURTO / MEDIO / LONGO prazo
   glosaConfig: {},            // por competência: { 'JULHO/2026': {dataFaturamento, prazoDias, status} }
+  glosaRelatorios: [],        // relatórios de glosas salvos/numerados (ex.: 001.08.2026) p/ acompanhamento
 };
 
 let currentView = "dashboard";
@@ -833,6 +880,13 @@ function garantirModulosNovos(){
   if(!Array.isArray(STATE.glosaJustificativas)) STATE.glosaJustificativas = [];
   if(!Array.isArray(STATE.glosaPlanoAcao)) STATE.glosaPlanoAcao = [];
   if(!STATE.glosaConfig || typeof STATE.glosaConfig !== 'object') STATE.glosaConfig = {};
+  /* Relatórios de glosas salvos (numerados). Criado depois — só nasce vazio quando ainda
+     não existe; relatórios já salvos jamais são tocados. */
+  if(!Array.isArray(STATE.glosaRelatorios)) STATE.glosaRelatorios = [];
+  STATE.glosaRelatorios.forEach(r=>{
+    if(!Array.isArray(r.historicoStatus)) r.historicoStatus = [];
+    if(r.status===undefined) r.status = 'Em preenchimento';
+  });
   if(!Array.isArray(STATE.glosaMotivos) || STATE.glosaMotivos.length===0){
     STATE.glosaMotivos = DEFAULT_GLOSA_MOTIVOS.map(m=>({ id: uid(), ...m }));
   }
@@ -997,14 +1051,14 @@ function vigenciaFor(laboratorio, convenioCadastro){
   return periodos.length ? periodos.join(' / ') : '—';
 }
 /* Monta o bloco de cabeçalho padrão (HTML): Prefeitura, Convênio, Laboratório, Vigência e Competência */
-function reportHeaderHTML({convenio, laboratorio, vigencia, competenciaText, mes, ano}){
+function reportHeaderHTML({convenio, laboratorio, vigencia, competenciaText, mes, ano, rotuloLaboratorio}){
   const compTxt = competenciaText || competenciaLabel(mes, ano);
   return `
     <div class="report-header">
       <div class="rh-prefeitura">🏛️ ${esc(entidadeNome())}</div>
       <div class="rh-grid">
         <div class="rh-item"><span>Convênio</span><b>${esc(convenio || '—')}</b></div>
-        <div class="rh-item"><span>Laboratório</span><b>${esc(laboratorio || '—')}</b></div>
+        <div class="rh-item"><span>${esc(rotuloLaboratorio || 'Laboratório')}</span><b>${esc(laboratorio || '—')}</b></div>
         <div class="rh-item"><span>Vigência</span><b>${esc(vigencia || '—')}</b></div>
         <div class="rh-item"><span>Competência</span><b>${esc(compTxt)}</b></div>
       </div>
@@ -1016,11 +1070,11 @@ function csvEsc(v){
   const s = (v===undefined||v===null)?'':String(v);
   return /[;"\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
 }
-function csvHeaderBlock({convenio, laboratorio, vigencia, competenciaText}){
+function csvHeaderBlock({convenio, laboratorio, vigencia, competenciaText, rotuloLaboratorio}){
   return [
     csvEsc(entidadeNome()),
     ['Convênio', csvEsc(convenio||'—')].join(';'),
-    ['Laboratório', csvEsc(laboratorio||'—')].join(';'),
+    [rotuloLaboratorio||'Laboratório', csvEsc(laboratorio||'—')].join(';'),
     ['Vigência', csvEsc(vigencia||'—')].join(';'),
     ['Competência', csvEsc(competenciaText||'—')].join(';'),
     ''
@@ -1065,6 +1119,43 @@ function printReportLandscape(targetId){
     document.head.appendChild(styleTag);
   }
   styleTag.innerHTML = '@media print{ @page{ size: A4 landscape; margin: 10mm; } }';
+  printReport(targetId);
+}
+/* ---------------- Escolha da orientação do papel na hora de imprimir ----------------
+   printReportAsk() abre uma caixinha perguntando RETRATO ou PAISAGEM e só então
+   imprime, forçando o @page correspondente apenas durante aquela impressão (a regra
+   temporária é removida no evento afterprint, logo abaixo). Nenhum dado é alterado. */
+let printPendingTarget = null;
+function printReportAsk(targetId, titulo){
+  const el = document.getElementById(targetId);
+  if(!el){ showToast('Nada para imprimir.'); return; }
+  printPendingTarget = targetId;
+  const t = document.getElementById('printOrientTitulo');
+  if(t) t.textContent = titulo || 'Escolha a orientação do papel para este relatório.';
+  const box = document.getElementById('printOrientDialog');
+  if(!box){ printReport(targetId); return; }
+  box.classList.add('open');
+}
+function printOrientCancel(){
+  printPendingTarget = null;
+  const box = document.getElementById('printOrientDialog');
+  if(box) box.classList.remove('open');
+}
+function printOrientGo(orientacao){
+  const target = printPendingTarget;
+  printOrientCancel();
+  if(!target) return;
+  printReportOrientado(target, orientacao);
+}
+function printReportOrientado(targetId, orientacao){
+  const paisagem = orientacao==='landscape';
+  let styleTag = document.getElementById('tempLandscapeStyle');
+  if(!styleTag){
+    styleTag = document.createElement('style');
+    styleTag.id = 'tempLandscapeStyle';
+    document.head.appendChild(styleTag);
+  }
+  styleTag.innerHTML = `@media print{ @page{ size: A4 ${paisagem?'landscape':'portrait'}; margin: ${paisagem?'10mm':'12mm'}; } }`;
   printReport(targetId);
 }
 window.addEventListener('afterprint', ()=>{
@@ -1276,7 +1367,9 @@ const NAV_BASE = [
     {id:'glosas', label:'Glosas', icon:'⚠️'},
   ]},
   {group:'6. Consolidado', items:[
-    {id:'relatorios', label:'Relatórios', icon:'📁'},
+    {id:'relatorios', label:'Relatórios de Exames Laboratoriais', icon:'🧪'},
+    {id:'relatoriosImagem', label:'Relatórios de Exames de Imagem', icon:'🩻'},
+    {id:'relatoriosGlosas', label:'Relatórios de Glosas', icon:'⚠️'},
   ]},
 ];
 const NAV_ADMIN = [
@@ -1298,7 +1391,9 @@ const PAGE_META = {
   nf:['Emissão de N.F.','Resumo de quantidades e valores para solicitar as notas fiscais dos laboratórios.'],
   comparativo:['Comparativo entre Laboratórios','Importe o arquivo do laboratório principal e do laboratório terceirizado e veja o relatório de inconsistências.'],
   glosas:['Glosas','Registre as glosas por convênio/operadora, os motivos, as justificativas e o plano de ação — e emita o Relatório de Glosas.'],
-  relatorios:['Relatórios','Consolidado de todas as competências já fechadas.'],
+  relatorios:['Consolidado — Relatórios de Exames Laboratoriais','Consolidado dos exames realizados pelos laboratórios, em todas as competências já fechadas.'],
+  relatoriosImagem:['Consolidado — Relatórios de Exames de Imagem','Mesmo conjunto de relatórios, considerando apenas as clínicas/operadoras cadastradas (exames de imagem).'],
+  relatoriosGlosas:['Consolidado — Relatórios de Glosas','Acompanhamento dos relatórios de glosas já emitidos, pela numeração e pelo status do cronograma de recurso.'],
   usuarios:['Usuários','Cadastre usuários e senhas para acesso ao sistema. Apenas o administrador (master) vê este módulo.'],
   logAcesso:['Log de Acesso','Veja quem usou o sistema: usuário, data, hora início, hora final e comandos acessados. Apenas o administrador (master) vê este módulo.'],
 };
@@ -1338,10 +1433,12 @@ function render(){
   else if(currentView==='lancamento') v.innerHTML = viewLancamento();
   else if(currentView==='nf') v.innerHTML = viewNF();
   else if(currentView==='comparativo') v.innerHTML = viewComparativo();
-  else if(currentView==='relatorios') v.innerHTML = viewRelatorios();
+  else if(currentView==='relatorios'){ setRelEscopo('LAB'); v.innerHTML = viewRelatorios(); }
+  else if(currentView==='relatoriosImagem'){ setRelEscopo('IMAGEM'); v.innerHTML = viewRelatorios(); }
+  else if(currentView==='relatoriosGlosas') v.innerHTML = viewRelatoriosGlosas();
   else if(currentView==='usuarios') v.innerHTML = viewUsuarios();
   else if(currentView==='logAcesso') v.innerHTML = viewLogAcesso();
-  const VIEWS_COM_FORM = ['entidade','labs','exames','tiposConvenio','lancamento','comparativo','glosas','relatorios'];
+  const VIEWS_COM_FORM = ['entidade','labs','exames','tiposConvenio','lancamento','comparativo','glosas','relatorios','relatoriosImagem','relatoriosGlosas'];
   if(!podeEditar(currentView) && VIEWS_COM_FORM.includes(currentView)){
     v.insertAdjacentHTML('afterbegin', `<div class="read-only-notice">🔒 Seu perfil de acesso (${esc(perfilLabel(perfilAtual()))}) permite apenas visualizar e imprimir este módulo.</div>`);
   }
@@ -1997,6 +2094,30 @@ function estabelecimentoLabel(v){
   return 'Laboratório';
 }
 
+/* ------------------------------------------------------------------
+   ESCOPO DOS RELATÓRIOS CONSOLIDADOS: exames laboratoriais x exames de imagem
+   O que separa um do outro é o campo "Tipo de estabelecimento" do cadastro
+   (Laboratório  ->  exames laboratoriais; Clínica/Operadora -> exames de imagem).
+   Cadastros antigos, feitos antes desse campo existir, já foram migrados para
+   "Laboratório" em garantirModulosNovos(); e qualquer nome que apareça só nos
+   lançamentos (laboratório excluído do cadastro, por exemplo) também é tratado
+   como "Laboratório". Ou seja: enquanto nada for cadastrado como clínica/operadora,
+   o relatório laboratorial mostra exatamente o que sempre mostrou.
+   ------------------------------------------------------------------ */
+let relEscopo = 'LAB'; // 'LAB' = exames laboratoriais | 'IMAGEM' = exames de imagem
+function setRelEscopo(e){
+  if(relEscopo!==e){ relEscopo = e; customReportState.lab = 'TODOS'; }
+}
+function escopoDoLaboratorio(nome){
+  const l = (STATE.labs||[]).find(x=>x.nome===nome);
+  const est = (l && l.estabelecimento) ? l.estabelecimento : 'LABORATORIO';
+  return est==='LABORATORIO' ? 'LAB' : 'IMAGEM';
+}
+function escopoRotuloSingular(){ return relEscopo==='IMAGEM' ? 'Clínica/Operadora' : 'Laboratório'; }
+function escopoRotuloPlural(){ return relEscopo==='IMAGEM' ? 'Clínicas/Operadoras' : 'Laboratórios'; }
+function escopoRotuloTodos(){ return relEscopo==='IMAGEM' ? 'Todas as clínicas/operadoras' : 'Todos os laboratórios'; }
+function escopoTituloModulo(){ return relEscopo==='IMAGEM' ? 'Exames de Imagem' : 'Exames Laboratoriais'; }
+
 /* ============================================================
    CADASTRO DA ENTIDADE
    Dados institucionais de quem usa o sistema. O "Nome fantasia" é exibido
@@ -2078,6 +2199,10 @@ function limparEntidade(){
    ============================================================ */
 let glosaComp = 'ATUAL';        // 'ATUAL' ou o id de uma competência já fechada
 let glosaLabFilter = 'TODOS';
+let glosaFormAberto = false;    // painel "Inserir/Editar glosa" aberto?
+let glosaBuscaAberta = false;   // painel "Buscar relatórios de glosas salvos" aberto?
+let glosaBusca = { termo:'', status:'TODOS', ano:'TODOS', lab:'TODOS' };
+let glosaRelatorioAberto = null; // id do relatório salvo aberto para visualização/impressão
 let editingGlosaId = null;
 let editingMotivoId = null;
 let editingJustifId = null;
@@ -2099,6 +2224,17 @@ function glosaPrazoLabel(k){ return (GLOSA_PRAZOS.find(p=>p.key===k)||{}).label 
 
 function setGlosaComp(v){ glosaComp=v; glosaLabFilter='TODOS'; editingGlosaId=null; render(); }
 function setGlosaLabFilter(v){ glosaLabFilter=v; render(); }
+
+/* Cor da etiqueta de status, usada nas listas de acompanhamento */
+function glosaStatusClass(s){
+  const t = String(s||'').toLowerCase();
+  if(t.includes('deferido') && t.includes('in')) return 'st-indeferido';
+  if(t.includes('deferido')) return 'st-deferido';
+  if(t.includes('enviado')) return 'st-enviado';
+  if(t.includes('análise') || t.includes('analise')) return 'st-analise';
+  return 'st-preench';
+}
+function glosaStatusPill(s){ return `<span class="status-pill ${glosaStatusClass(s)}">${esc(s||'—')}</span>`; }
 
 function glosaCompetenciaOptions(){
   const closed = STATE.historico.slice().sort((a,b)=> (b.ano-a.ano) || (MESES.indexOf(b.mes)-MESES.indexOf(a.mes)));
@@ -2163,6 +2299,120 @@ function saveGlosaCfg(){
   cfg.status = document.getElementById('gcStatus').value;
   saveState(); render(); showToast('Cronograma do recurso atualizado.','success');
 }
+
+/* ============================================================
+   RELATÓRIOS DE GLOSAS SALVOS (numerados) E ACOMPANHAMENTO
+   Cada relatório salvo é uma FOTOGRAFIA do que estava na tela no momento em que
+   foi salvo (resumo, detalhamento, motivos, justificativas, plano de ação e
+   cronograma). Ele passa a viver em STATE.glosaRelatorios, uma lista nova e
+   independente: nenhuma glosa, lançamento ou competência já cadastrada é alterada
+   ou apagada ao salvar, editar o status ou excluir um relatório salvo.
+   A numeração é automática: ORDEM.MÊS.ANO da competência — ex.: 001.08.2026.
+   ============================================================ */
+function mesNumero(mes){
+  const i = MESES.indexOf(mes);
+  return i>=0 ? pad2(i+1) : '00';
+}
+function proximoNumeroGlosa(mes, ano){
+  const doPeriodo = (STATE.glosaRelatorios||[]).filter(r=>r.mes===mes && String(r.ano)===String(ano));
+  const seq = doPeriodo.reduce((s,r)=>Math.max(s, Number(r.seq)||0), 0) + 1;
+  return { seq, numero: `${String(seq).padStart(3,'0')}.${mesNumero(mes)}.${ano}` };
+}
+/* Salva o Relatório de Glosas da competência/filtro atuais, já numerado. */
+function salvarRelatorioGlosas(){
+  if(semPermissao('glosas')) return;
+  const lista = glosasFiltradas();
+  if(lista.length===0){ showToast('Não há glosas registradas para esta competência/filtro. Registre ao menos uma glosa antes de salvar o relatório.'); return; }
+  const {mes, ano} = glosaMesAno();
+  const cfg = glosaCfg();
+  const {seq, numero} = proximoNumeroGlosa(mes, ano);
+  const agora = new Date().toISOString();
+  const por = glosaResponsavelFaturamento();
+  if(!confirm(`Salvar o Relatório de Glosas da competência ${mes}/${ano} com o número ${numero}?\n\nEle fica guardado para acompanhamento em Consolidado → Relatórios de Glosas. Nenhuma glosa ou lançamento é alterado.`)) return;
+  STATE.glosaRelatorios.push({
+    id: uid(), numero, seq, mes, ano,
+    competencia: glosaCompKey(),
+    competenciaTexto: glosaCompetenciaLabelText(),
+    laboratorio: glosaLabFilter==='TODOS' ? '' : glosaLabFilter,
+    identificacao: glosaIdentificacaoLab(),
+    entidade: entidadeNome(),
+    emitidoEm: agora,
+    emitidoPor: por,
+    gestor: glosaGestorLaboratorio(),
+    dataFaturamento: cfg.dataFaturamento || '',
+    prazoDias: Number(cfg.prazoDias)||0,
+    prazoLimite: prazoLimiteRecurso(),
+    status: cfg.status || GLOSA_STATUS[0],
+    resumo: {...glosaResumoFinanceiro()},
+    detalhe: JSON.parse(JSON.stringify(glosaDetalhePorConvenio())),
+    glosas: JSON.parse(JSON.stringify(lista)),
+    motivos: JSON.parse(JSON.stringify(STATE.glosaMotivos||[])),
+    justificativas: JSON.parse(JSON.stringify(STATE.glosaJustificativas||[])),
+    planoAcao: JSON.parse(JSON.stringify(STATE.glosaPlanoAcao||[])),
+    historicoStatus: [{ status: cfg.status || GLOSA_STATUS[0], em: agora, por, obs: 'Relatório salvo.' }],
+  });
+  glosaBuscaAberta = true;
+  saveState(); render();
+  showToast(`Relatório de glosas ${numero} salvo. Acompanhe em Consolidado → Relatórios de Glosas.`,'success');
+}
+function glosaRelatorioPorId(id){ return (STATE.glosaRelatorios||[]).find(r=>r.id===id) || null; }
+/* Atualiza o status de acompanhamento (item 4 — Cronograma de Recurso de Glosa)
+   de um relatório já salvo, guardando o histórico de cada mudança. */
+function atualizarStatusRelatorioGlosa(id, novoStatus, obs){
+  if(semPermissao('glosas')) return;
+  const r = glosaRelatorioPorId(id);
+  if(!r) return;
+  if(!novoStatus || novoStatus===r.status) return;
+  r.status = novoStatus;
+  if(!Array.isArray(r.historicoStatus)) r.historicoStatus = [];
+  r.historicoStatus.push({ status: novoStatus, em: new Date().toISOString(), por: glosaResponsavelFaturamento(), obs: obs||'' });
+  saveState(); render();
+  showToast(`Relatório ${r.numero}: status atualizado para "${novoStatus}".`,'success');
+}
+function onChangeStatusRelatorioGlosa(id, sel){ atualizarStatusRelatorioGlosa(id, sel.value); }
+function abrirRelatorioGlosaSalvo(id){
+  glosaRelatorioAberto = (glosaRelatorioAberto===id) ? null : id;
+  render();
+  if(glosaRelatorioAberto){
+    setTimeout(()=>{ const el=document.getElementById('glosaRelSalvo_'+id); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }, 60);
+  }
+}
+function excluirRelatorioGlosaSalvo(id){
+  if(semPermissao('glosas')) return;
+  const r = glosaRelatorioPorId(id);
+  if(!r) return;
+  if(!confirm(`Excluir o relatório de glosas ${r.numero}?\n\nApenas este relatório salvo é removido — as glosas lançadas, os lançamentos e as competências continuam intactos.`)) return;
+  STATE.glosaRelatorios = STATE.glosaRelatorios.filter(x=>x.id!==id);
+  if(glosaRelatorioAberto===id) glosaRelatorioAberto = null;
+  saveState(); render(); showToast(`Relatório ${r.numero} excluído.`);
+}
+/* Filtro usado tanto no painel de busca dentro do módulo Glosas quanto no
+   Consolidado → Relatórios de Glosas. */
+function glosaRelatoriosFiltrados(f){
+  const t = String(f.termo||'').trim().toLowerCase();
+  return (STATE.glosaRelatorios||[]).slice()
+    .filter(r=>{
+      if(f.status && f.status!=='TODOS' && (r.status||'')!==f.status) return false;
+      if(f.ano && f.ano!=='TODOS' && String(r.ano)!==String(f.ano)) return false;
+      if(f.mes && f.mes!=='TODOS' && r.mes!==f.mes) return false;
+      if(f.lab && f.lab!=='TODOS' && (r.laboratorio||'')!==f.lab) return false;
+      if(t && !((r.numero||'').toLowerCase().includes(t)
+             || (r.identificacao||'').toLowerCase().includes(t)
+             || (r.laboratorio||'').toLowerCase().includes(t)
+             || (r.competencia||'').toLowerCase().includes(t))) return false;
+      return true;
+    })
+    .sort((a,b)=> (b.ano-a.ano) || (MESES.indexOf(b.mes)-MESES.indexOf(a.mes)) || ((b.seq||0)-(a.seq||0)));
+}
+function glosaRelatoriosAnos(){
+  const set = new Set((STATE.glosaRelatorios||[]).map(r=>String(r.ano)));
+  return Array.from(set).sort((a,b)=>Number(b)-Number(a));
+}
+function glosaRelatoriosLabs(){
+  const set = new Set((STATE.glosaRelatorios||[]).map(r=>r.laboratorio).filter(Boolean));
+  return Array.from(set).sort((a,b)=>a.localeCompare(b,'pt-BR',{sensitivity:'base'}));
+}
+function gbSet(campo, valor){ glosaBusca[campo] = valor; render(); }
 
 /* Glosas da competência + laboratório selecionados nos filtros */
 function glosasFiltradas(){
@@ -2255,11 +2505,11 @@ function saveGlosa(){
 }
 function editGlosa(id){
   if(semPermissao('glosas')) return;
-  editingGlosaId = id; render();
-  const el = document.getElementById('gsExame');
-  if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
+  editingGlosaId = id; glosaFormAberto = true; render();
+  const el = document.getElementById('cardNovaGlosa');
+  if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
 }
-function cancelEditGlosa(){ editingGlosaId = null; render(); }
+function cancelEditGlosa(){ editingGlosaId = null; glosaFormAberto = false; render(); }
 function deleteGlosa(id){
   if(semPermissao('glosas')) return;
   if(!confirm('Excluir esta glosa? Os lançamentos de exames não são afetados.')) return;
@@ -2375,12 +2625,27 @@ function viewGlosas(){
         </select>
       </div>
       <div class="field" style="align-self:end;">
-        <button class="btn secondary small print-btn" onclick="printReport('glosaReport')" style="width:100%;justify-content:center;">🖨️ Imprimir relatório</button>
+        <button class="btn secondary small print-btn" onclick="printReportAsk('glosaReport','Relatório de Glosas — ${esc(glosaCompKey())}')" style="width:100%;justify-content:center;">🖨️ Imprimir relatório</button>
       </div>
       <div class="field" style="align-self:end;">
         <button class="btn secondary small" onclick="emailRelatorioGlosas()" style="width:100%;justify-content:center;" ${temEmail?'':'disabled title="Selecione um laboratório/clínica/operadora com e-mail cadastrado"'}>📧 Enviar por Gmail</button>
       </div>
     </div>
+
+    <!-- Barra de comandos do módulo: inserir, editar, salvar e buscar relatórios de glosas -->
+    <div class="card" style="margin-bottom:14px;">
+      <div class="flexrow" style="flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn edit-only" onclick="abrirInserirGlosa()">➕ Inserir glosa</button>
+          <button class="btn secondary edit-only" onclick="abrirEditarGlosas()">✏️ Editar glosas</button>
+          <button class="btn secondary edit-only" onclick="salvarRelatorioGlosas()">💾 Salvar relatório de glosas</button>
+          <button class="btn secondary" onclick="toggleBuscaRelatoriosGlosas()">🔎 Buscar relatórios de glosas${(STATE.glosaRelatorios||[]).length?` (${fmtNum((STATE.glosaRelatorios||[]).length)})`:''}</button>
+        </div>
+        <div class="muted" style="font-size:11.5px;">Próximo número desta competência: <span class="glosa-num">${esc(proximoNumeroGlosa(glosaMesAno().mes, glosaMesAno().ano).numero)}</span></div>
+      </div>
+    </div>
+
+    ${glosaBuscaAberta ? painelBuscaRelatoriosGlosas() : ''}
 
     <div class="grid cols-4" style="margin-bottom:16px;">
       <div class="stat"><div class="label">Valor total faturado</div><div class="value">${fmtMoney(resumo.faturado)}</div></div>
@@ -2405,8 +2670,11 @@ function viewGlosas(){
       <div style="margin-top:14px;"><button class="btn" onclick="saveGlosaCfg()">💾 Salvar cronograma</button></div>
     </div>
 
-    <div class="card edit-only">
-      <h2>${editing ? '✏️ Editar glosa' : 'Nova glosa'}</h2>
+    <div class="card edit-only" id="cardNovaGlosa" style="${(glosaFormAberto||editing)?'':'display:none;'}">
+      <div class="flexrow" style="margin-bottom:2px;">
+        <h2 style="margin:0;">${editing ? '✏️ Editar glosa' : '➕ Inserir glosa'}</h2>
+        <button class="btn ghost small" onclick="fecharFormGlosa()">✕ fechar</button>
+      </div>
       <div class="subtitle">O laboratório e o convênio/processo são preenchidos automaticamente a partir do exame escolhido no Cadastro de Exames. A glosa é gravada na competência ${esc(glosaCompKey())}.</div>
       <datalist id="glosaMotivosList">
         ${STATE.glosaMotivos.map(m=>`<option value="${esc(m.texto)}"></option>`).join('')}
@@ -2435,9 +2703,12 @@ function viewGlosas(){
       </div>
     </div>
 
-    <div class="card">
-      <h2>Glosas registradas — ${esc(glosaCompKey())}${glosaLabFilter==='TODOS'?'':' — '+esc(glosaLabFilter)}</h2>
-      <div class="table-wrap"><table>
+    <div class="card" id="cardGlosasRegistradas">
+      <div class="flexrow">
+        <h2 style="margin:0;">Glosas registradas — ${esc(glosaCompKey())}${glosaLabFilter==='TODOS'?'':' — '+esc(glosaLabFilter)}</h2>
+        <button class="btn secondary small edit-only" onclick="abrirInserirGlosa()">➕ Inserir glosa</button>
+      </div>
+      <div class="table-wrap" style="margin-top:10px;"><table>
         <thead><tr><th>Convênio/Operadora</th><th>Laboratório</th><th>Exame glosado</th><th class="right">Qtd.</th><th class="right">Valor glosado</th><th class="right">Recuperável</th><th>Tipo</th><th>Motivo</th><th>Status</th><th></th></tr></thead>
         <tbody>
           ${lista.length===0 ? `<tr class="empty-row"><td colspan="10">Nenhuma glosa registrada para este filtro.</td></tr>` :
@@ -2549,14 +2820,136 @@ function viewGlosas(){
     <div class="section-title">Relatório de Glosas</div>
     <div class="card">
       <div class="flexrow" style="margin-bottom:10px;">
-        <h2 style="margin:0;">Pré-visualização — pronto para imprimir ou enviar</h2>
-        <div style="display:flex;gap:6px;">
-          <button class="btn secondary small print-btn" onclick="printReport('glosaReport')">🖨️ Imprimir</button>
+        <h2 style="margin:0;">Pré-visualização — pronto para salvar, imprimir ou enviar</h2>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn small edit-only" onclick="salvarRelatorioGlosas()">💾 Salvar relatório (nº ${esc(proximoNumeroGlosa(glosaMesAno().mes, glosaMesAno().ano).numero)})</button>
+          <button class="btn secondary small print-btn" onclick="printReportAsk('glosaReport','Relatório de Glosas — ${esc(glosaCompKey())}')">🖨️ Imprimir</button>
           <button class="btn secondary small" onclick="emailRelatorioGlosas()" ${temEmail?'':'disabled title="Selecione um laboratório/clínica/operadora com e-mail cadastrado"'}>📧 Enviar por Gmail</button>
         </div>
       </div>
       ${glosaReportHTML()}
     </div>
+  `;
+}
+
+/* ---------------- Comandos da barra do módulo Glosas ---------------- */
+function abrirInserirGlosa(){
+  if(semPermissao('glosas')) return;
+  editingGlosaId = null;
+  glosaFormAberto = true;
+  render();
+  setTimeout(()=>{ const el=document.getElementById('cardNovaGlosa'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }, 60);
+}
+function abrirEditarGlosas(){
+  if(semPermissao('glosas')) return;
+  const lista = glosasFiltradas();
+  if(lista.length===0){ showToast('Não há glosas registradas nesta competência/filtro para editar.'); return; }
+  if(lista.length===1){ editGlosa(lista[0].id); return; }
+  showToast('Clique em "✏️ editar" na glosa que deseja alterar.');
+  const el = document.getElementById('cardGlosasRegistradas');
+  if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+}
+function fecharFormGlosa(){ glosaFormAberto = false; editingGlosaId = null; render(); }
+function toggleBuscaRelatoriosGlosas(){
+  glosaBuscaAberta = !glosaBuscaAberta;
+  render();
+  if(glosaBuscaAberta){
+    setTimeout(()=>{ const el=document.getElementById('cardBuscaGlosas'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }, 60);
+  }
+}
+
+/* ---------------- Painel: buscar e acompanhar relatórios de glosas salvos ---------------- */
+function painelBuscaRelatoriosGlosas(){
+  const f = glosaBusca;
+  const list = glosaRelatoriosFiltrados(f);
+  const totGlosado = list.reduce((s,r)=>s+((r.resumo&&r.resumo.glosado)||0),0);
+  const totRecup   = list.reduce((s,r)=>s+((r.resumo&&r.resumo.recuperavel)||0),0);
+  const aberto = glosaRelatorioAberto ? glosaRelatorioPorId(glosaRelatorioAberto) : null;
+  return `
+    <div class="card" id="cardBuscaGlosas">
+      <div class="flexrow">
+        <div>
+          <h2 style="margin:0;">🔎 Relatórios de glosas salvos</h2>
+          <div class="subtitle" style="margin-bottom:0;">Busque pela numeração (ex.: 001.08.2026), pelo laboratório/clínica ou pelo <b>status atual</b> do item 4 — Cronograma de Recurso de Glosa.</div>
+        </div>
+        <button class="btn ghost small" onclick="toggleBuscaRelatoriosGlosas()">✕ fechar</button>
+      </div>
+      <div class="formgrid" style="grid-template-columns:repeat(4,1fr);margin-top:12px;">
+        <div class="field"><label>Buscar</label><input value="${esc(f.termo)}" placeholder="Nº, laboratório ou competência" oninput="glosaBusca.termo=this.value;debouncedRender();"></div>
+        <div class="field"><label>Status atual</label><select onchange="gbSet('status',this.value)">
+          <option value="TODOS" ${f.status==='TODOS'?'selected':''}>Todos os status</option>
+          ${GLOSA_STATUS.map(s=>`<option value="${esc(s)}" ${f.status===s?'selected':''}>${esc(s)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Ano</label><select onchange="gbSet('ano',this.value)">
+          <option value="TODOS" ${f.ano==='TODOS'?'selected':''}>Todos</option>
+          ${glosaRelatoriosAnos().map(a=>`<option value="${esc(a)}" ${String(f.ano)===String(a)?'selected':''}>${esc(a)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Laboratório/Clínica/Operadora</label><select onchange="gbSet('lab',this.value)">
+          <option value="TODOS" ${f.lab==='TODOS'?'selected':''}>Todos</option>
+          ${glosaRelatoriosLabs().map(l=>`<option value="${esc(l)}" ${f.lab===l?'selected':''}>${esc(l)}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="muted" style="font-size:12px;margin:10px 0;">${fmtNum(list.length)} relatório(s) encontrado(s) · Glosado: <b>${fmtMoney(totGlosado)}</b> · Recuperável: <b>${fmtMoney(totRecup)}</b></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nº</th><th>Competência</th><th>Laboratório/Clínica</th><th>Emitido em</th><th class="right">Glosado</th><th class="right">Recuperável</th><th>Prazo limite</th><th>Status atual</th><th></th></tr></thead>
+        <tbody>
+          ${list.length===0 ? `<tr class="empty-row"><td colspan="9">Nenhum relatório de glosas salvo para este filtro.</td></tr>` :
+            list.map(r=>`<tr>
+              <td><span class="glosa-num">${esc(r.numero)}</span></td>
+              <td>${esc(r.competencia)}</td>
+              <td>${esc(r.identificacao||r.laboratorio||'—')}</td>
+              <td>${esc(r.emitidoEm ? new Date(r.emitidoEm).toLocaleDateString('pt-BR') : '—')}</td>
+              <td class="right">${fmtMoney((r.resumo&&r.resumo.glosado)||0)}</td>
+              <td class="right">${fmtMoney((r.resumo&&r.resumo.recuperavel)||0)}</td>
+              <td>${esc(r.prazoLimite||'—')}</td>
+              <td>
+                ${podeEditar('glosas')
+                  ? `<select onchange="onChangeStatusRelatorioGlosa('${r.id}', this)" style="min-width:170px;">
+                       ${GLOSA_STATUS.map(s=>`<option value="${esc(s)}" ${r.status===s?'selected':''}>${esc(s)}</option>`).join('')}
+                     </select>`
+                  : glosaStatusPill(r.status)}
+              </td>
+              <td style="white-space:nowrap;">
+                <button class="btn ghost small" onclick="abrirRelatorioGlosaSalvo('${r.id}')">${glosaRelatorioAberto===r.id?'▾ fechar':'👁 abrir'}</button>
+                <button class="btn ghost small edit-only" onclick="excluirRelatorioGlosaSalvo('${r.id}')">🗑 excluir</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+        ${list.length===0?'':`<tfoot><tr>
+          <td colspan="4"><b>SOMA TOTAL — ${fmtNum(list.length)} relatório(s)</b></td>
+          <td class="right"><b>${fmtMoney(totGlosado)}</b></td>
+          <td class="right"><b>${fmtMoney(totRecup)}</b></td>
+          <td colspan="3"></td>
+        </tr></tfoot>`}
+      </table></div>
+    </div>
+    ${aberto ? `
+    <div class="card">
+      <div class="flexrow" style="margin-bottom:10px;">
+        <div>
+          <h2 style="margin:0;">Relatório <span class="glosa-num">${esc(aberto.numero)}</span> — ${esc(aberto.competencia)}</h2>
+          <div class="subtitle" style="margin-bottom:0;">Fotografia do relatório no momento em que foi salvo. Status atual: ${glosaStatusPill(aberto.status)}</div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn secondary small print-btn" onclick="printReportAsk('glosaRelSalvo_${aberto.id}','Relatório de Glosas nº ${esc(aberto.numero)}')">🖨️ Imprimir</button>
+          <button class="btn ghost small" onclick="abrirRelatorioGlosaSalvo('${aberto.id}')">✕ fechar</button>
+        </div>
+      </div>
+      ${glosaReportHTML(aberto, 'glosaRelSalvo_'+aberto.id)}
+      ${(aberto.historicoStatus&&aberto.historicoStatus.length) ? `
+      <div class="glosa-sec" style="margin-top:12px;">
+        <h3>Histórico de acompanhamento</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Data</th><th>Status</th><th>Registrado por</th><th>Observação</th></tr></thead>
+          <tbody>${aberto.historicoStatus.slice().reverse().map(h=>`<tr>
+            <td>${esc(h.em ? new Date(h.em).toLocaleString('pt-BR') : '—')}</td>
+            <td>${glosaStatusPill(h.status)}</td>
+            <td>${esc(h.por||'—')}</td>
+            <td>${esc(h.obs||'')||'—'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>` : ''}
+    </div>` : ''}
   `;
 }
 
@@ -2574,27 +2967,57 @@ function glosaIdentificacaoLab(){
   const labs = [...new Set(glosasFiltradas().map(g=>g.laboratorio))];
   return labs.length===1 ? labs[0] : 'Todos os laboratórios/clínicas/operadoras';
 }
-function glosaReportHTML(){
+/* Junta, num único objeto, tudo o que o Relatório de Glosas mostra na competência/filtro
+   atuais. É esse mesmo objeto que fica congelado dentro de um relatório salvo, para que a
+   reimpressão futura mostre exatamente o que foi emitido na época. */
+function glosaReportDados(){
   const cfg = glosaCfg();
-  const resumo = glosaResumoFinanceiro();
-  const det = glosaDetalhePorConvenio();
-  const totQtd = det.reduce((s,r)=>s+r.qtd,0);
-  const motAdm = STATE.glosaMotivos.filter(m=>m.categoria==='ADMINISTRATIVA');
-  const motTec = STATE.glosaMotivos.filter(m=>m.categoria!=='ADMINISTRATIVA');
-  const gestor = glosaGestorLaboratorio();
+  return {
+    numero: '',
+    entidade: entidadeNome(),
+    identificacao: glosaIdentificacaoLab(),
+    competenciaTexto: glosaCompetenciaLabelText(),
+    emitidoEm: new Date().toISOString(),
+    emitidoPor: glosaResponsavelFaturamento(),
+    resumo: glosaResumoFinanceiro(),
+    detalhe: glosaDetalhePorConvenio(),
+    motivos: STATE.glosaMotivos || [],
+    justificativas: STATE.glosaJustificativas || [],
+    planoAcao: STATE.glosaPlanoAcao || [],
+    dataFaturamento: cfg.dataFaturamento || '',
+    prazoDias: cfg.prazoDias,
+    prazoLimite: prazoLimiteRecurso(),
+    status: cfg.status || '—',
+    gestor: glosaGestorLaboratorio(),
+  };
+}
+/* Monta o HTML do Relatório de Glosas. Sem argumentos, usa os dados atuais da tela
+   (pré-visualização). Recebendo um relatório salvo, remonta a fotografia guardada. */
+function glosaReportHTML(dados, domId){
+  const d = dados || glosaReportDados();
+  const id = domId || 'glosaReport';
+  const resumo = d.resumo || {faturado:0, glosado:0, recuperavel:0, indice:0};
+  const det = d.detalhe || [];
+  const totQtd = det.reduce((s,r)=>s+(Number(r.qtd)||0),0);
+  const motivos = d.motivos || [];
+  const motAdm = motivos.filter(m=>m.categoria==='ADMINISTRATIVA');
+  const motTec = motivos.filter(m=>m.categoria!=='ADMINISTRATIVA');
+  const gestor = d.gestor;
+  const emissao = d.emitidoEm ? new Date(d.emitidoEm).toLocaleDateString('pt-BR') : '—';
   const listaOuVazio = (arr, render) => arr.length
     ? `<ul class="glosa-list">${arr.map(render).join('')}</ul>`
     : `<div class="muted" style="font-size:12.5px;">Nenhum item cadastrado.</div>`;
   return `
-    <div id="glosaReport">
+    <div id="${esc(id)}">
       <div class="glosa-report-title">RELATÓRIO DE GLOSAS DE EXAMES LABORATORIAIS</div>
+      ${d.numero ? `<div class="glosa-report-num">Nº ${esc(d.numero)}</div>` : ''}
       <div class="report-header">
-        <div class="rh-prefeitura">🏛️ ${esc(entidadeNome())}</div>
+        <div class="rh-prefeitura">🏛️ ${esc(d.entidade || entidadeNome())}</div>
         <div class="rh-grid">
-          <div class="rh-item"><span>Identificação do Laboratório</span><b>${esc(glosaIdentificacaoLab())}</b></div>
-          <div class="rh-item"><span>Período de Faturamento</span><b>${esc(glosaCompetenciaLabelText())}</b></div>
-          <div class="rh-item"><span>Data de Emissão do Relatório</span><b>${esc(new Date().toLocaleDateString('pt-BR'))}</b></div>
-          <div class="rh-item"><span>Responsável pelo Faturamento/Auditoria</span><b>${esc(glosaResponsavelFaturamento())}</b></div>
+          <div class="rh-item"><span>Identificação do Laboratório</span><b>${esc(d.identificacao)}</b></div>
+          <div class="rh-item"><span>Período de Faturamento</span><b>${esc(d.competenciaTexto)}</b></div>
+          <div class="rh-item"><span>Data de Emissão do Relatório</span><b>${esc(emissao)}</b></div>
+          <div class="rh-item"><span>Responsável pelo Faturamento/Auditoria</span><b>${esc(d.emitidoPor)}</b></div>
         </div>
       </div>
 
@@ -2653,23 +3076,23 @@ function glosaReportHTML(){
         <h4>Técnicas / Médicas</h4>
         ${listaOuVazio(motTec, m=>`<li>${esc(m.texto)}</li>`)}
         <h4>Justificativas das Glosas</h4>
-        ${listaOuVazio(STATE.glosaJustificativas, j=>`<li>${esc(j.texto)}</li>`)}
+        ${listaOuVazio(d.justificativas||[], j=>`<li>${esc(j.texto)}</li>`)}
       </div>
 
       <div class="glosa-sec">
         <h3>4. Cronograma de Recurso de Glosa</h3>
         <div class="glosa-kv">
-          <div><span class="k">Data do Faturamento</span><span class="v">${esc(fmtDateBR(cfg.dataFaturamento))}</span></div>
-          <div><span class="k">Prazo para Envio do Recurso</span><span class="v">${esc(cfg.prazoDias)} dia(s)</span></div>
-          <div><span class="k">Prazo Limite para Envio do Recurso</span><span class="v">${esc(prazoLimiteRecurso())}</span></div>
-          <div><span class="k">Status Atual</span><span class="v">${esc(cfg.status||'—')}</span></div>
+          <div><span class="k">Data do Faturamento</span><span class="v">${esc(fmtDateBR(d.dataFaturamento))}</span></div>
+          <div><span class="k">Prazo para Envio do Recurso</span><span class="v">${esc(d.prazoDias)} dia(s)</span></div>
+          <div><span class="k">Prazo Limite para Envio do Recurso</span><span class="v">${esc(d.prazoLimite)}</span></div>
+          <div><span class="k">Status Atual</span><span class="v">${esc(d.status||'—')}</span></div>
         </div>
       </div>
 
       <div class="glosa-sec">
         <h3>5. Plano de Ação para Prevenção e Redução de Glosas</h3>
         ${GLOSA_PRAZOS.map(p=>{
-          const itens = STATE.glosaPlanoAcao.filter(a=>(a.prazo||'CURTO')===p.key);
+          const itens = (d.planoAcao||[]).filter(a=>(a.prazo||'CURTO')===p.key);
           return `<h4>${esc(p.label)}</h4>${listaOuVazio(itens, a=>`<li>${a.responsavel?`<b>${esc(a.responsavel)}:</b> `:''}${esc(a.texto)}</li>`)}`;
         }).join('')}
       </div>
@@ -2677,7 +3100,7 @@ function glosaReportHTML(){
       <div class="glosa-sec">
         <h3>6. Assinaturas e Aprovações</h3>
         <div class="glosa-sign">
-          <div class="sign-line"><b>${esc(glosaResponsavelFaturamento())}</b><span>Responsável pelo Faturamento</span></div>
+          <div class="sign-line"><b>${esc(d.emitidoPor)}</b><span>Responsável pelo Faturamento</span></div>
           <div class="sign-line"><b>${esc(gestor||'&nbsp;')}</b><span>Gestor/Diretor do Laboratório</span></div>
         </div>
       </div>
@@ -3775,24 +4198,58 @@ Total: ${fmtMoney(valCP+valCR)}`;
 /* ============================================================
    RELATÓRIOS / FECHAMENTO DE COMPETÊNCIA
    ============================================================ */
+/* Competências fechadas, recortadas para o escopo aberto (exames laboratoriais x exames
+   de imagem). Regras de segurança para não perder nada do que já existe:
+   - competência fechada ANTES de existir o detalhamento por laboratório (sem
+     "porLaboratorio") continua aparecendo integralmente no relatório LABORATORIAL,
+     exatamente como sempre apareceu;
+   - se todos os laboratórios da competência forem do escopo, os totais originais são
+     usados sem nenhum recálculo (números idênticos aos de hoje);
+   - só no caso misto (laboratórios + clínicas na mesma competência) os totais são
+     somados a partir do detalhamento por laboratório já gravado. Nada é regravado. */
+function historicoDoEscopo(){
+  const ordenado = STATE.historico.slice().sort((a,b)=> (a.ano-b.ano) || (MESES.indexOf(a.mes)-MESES.indexOf(b.mes)));
+  return ordenado.map(h=>{
+    const pl = Array.isArray(h.porLaboratorio) ? h.porLaboratorio : [];
+    if(pl.length===0) return relEscopo==='LAB' ? {...h} : null;
+    const doEscopo = pl.filter(x=>escopoDoLaboratorio(x.laboratorio)===relEscopo);
+    if(doEscopo.length===0) return null;
+    if(doEscopo.length===pl.length) return {...h};
+    const porConvenio = {};
+    let qtdTotal = 0, valorTotal = 0;
+    doEscopo.forEach(x=>{
+      const pc = getPeriodoPorConvenio(x);
+      Object.keys(pc).forEach(k=>{
+        if(!porConvenio[k]) porConvenio[k] = {qtd:0, valor:0};
+        porConvenio[k].qtd   += Number(pc[k].qtd)||0;
+        porConvenio[k].valor += Number(pc[k].valor)||0;
+      });
+      qtdTotal   += Number(x.qtdTotal)||0;
+      valorTotal += Number(x.valorTotal)||0;
+    });
+    return {...h, porConvenio, qtdTotal, valorTotal, porLaboratorio: doEscopo};
+  }).filter(Boolean);
+}
 function viewRelatorios(){
-  const rows = STATE.historico.slice().sort((a,b)=> (a.ano-b.ano) || (MESES.indexOf(a.mes)-MESES.indexOf(b.mes)));
+  const rows = historicoDoEscopo();
   const totQtd = rows.reduce((s,r)=>s+r.qtdTotal,0);
   const totValor = rows.reduce((s,r)=>s+r.valorTotal,0);
+  const rotLab = escopoRotuloSingular();
+  const rotTodos = escopoRotuloTodos();
   return `
     ${viewRelatorioPersonalizado()}
 
-    <div class="section-title">Modelos prontos</div>
+    <div class="section-title">Modelos prontos — ${esc(escopoTituloModulo())}</div>
     <div class="card">
       <div class="flexrow">
         <div>
           <h2 style="margin:0;">Relatório 1 — Consolidado por competência</h2>
           <div class="subtitle" style="margin-bottom:0;">Quantidade e valor por tipo de convênio/processo, por competência já fechada</div>
         </div>
-        <button class="btn secondary small print-btn" onclick="printReport('printRelatorio1')">🖨️ Imprimir</button>
+        <button class="btn secondary small print-btn" onclick="printReportAsk('printRelatorio1','Relatório 1 — Consolidado por competência')">🖨️ Imprimir</button>
       </div>
       <div id="printRelatorio1">
-        ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:'Todos os laboratórios', vigencia:'—', competenciaText:'Consolidado de todas as competências fechadas'})}
+        ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:rotTodos, vigencia:'—', competenciaText:'Consolidado de todas as competências fechadas', rotuloLaboratorio:rotLab})}
         <div class="table-wrap"><table>
           <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th>${STATE.tiposConvenio.map(t=>`<th class="right">Qtd ${esc(t.label)}</th><th class="right">Vlr ${esc(t.label)}</th>`).join('')}<th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
           <tbody>
@@ -3814,15 +4271,15 @@ function viewRelatorios(){
     <div class="card">
       <div class="flexrow">
         <div>
-          <h2 style="margin:0;">Relatório 2 — Por laboratório e tipo de convênio</h2>
-          <div class="subtitle" style="margin-bottom:0;">Detalha, para cada competência fechada, os laboratórios que compõem o backup</div>
+          <h2 style="margin:0;">Relatório 2 — Por ${esc(rotLab.toLowerCase())} e tipo de convênio</h2>
+          <div class="subtitle" style="margin-bottom:0;">Detalha, para cada competência fechada, ${relEscopo==='IMAGEM'?'as clínicas/operadoras':'os laboratórios'} que compõem o backup</div>
         </div>
-        <button class="btn secondary small print-btn" onclick="printReport('printRelatorio2')">🖨️ Imprimir</button>
+        <button class="btn secondary small print-btn" onclick="printReportAsk('printRelatorio2','Relatório 2 — Por ${esc(rotLab.toLowerCase())} e tipo de convênio')">🖨️ Imprimir</button>
       </div>
       <div id="printRelatorio2">
-        ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:'Todos os laboratórios', vigencia:'—', competenciaText:'Consolidado de todas as competências fechadas'})}
+        ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:rotTodos, vigencia:'—', competenciaText:'Consolidado de todas as competências fechadas', rotuloLaboratorio:rotLab})}
         <div class="table-wrap"><table>
-          <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th><th>Laboratório</th>${STATE.tiposConvenio.map(t=>`<th class="right">Qtd ${esc(t.label)}</th><th class="right">Vlr ${esc(t.label)}</th>`).join('')}<th class="right">Cota Princ.</th><th class="right">Cota Reser.</th><th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
+          <thead><tr><th>Nome Base</th><th>Mês</th><th>Ano</th><th>${esc(rotLab)}</th>${STATE.tiposConvenio.map(t=>`<th class="right">Qtd ${esc(t.label)}</th><th class="right">Vlr ${esc(t.label)}</th>`).join('')}<th class="right">Cota Princ.</th><th class="right">Cota Reser.</th><th class="right">Qtd Total</th><th class="right">Vlr Total</th></tr></thead>
           <tbody>
             ${rows.length===0 ? `<tr class="empty-row"><td colspan="${4+STATE.tiposConvenio.length*2+4}">Nenhuma competência fechada ainda.</td></tr>` :
               rows.flatMap(r=> (r.porLaboratorio||[]).map(pl=>{
@@ -3835,11 +4292,180 @@ function viewRelatorios(){
                 <td class="right"><b>${fmtNum(pl.qtdTotal)}</b></td><td class="right"><b>${fmtMoney(pl.valorTotal)}</b></td>
               </tr>`;})).join('')}
           </tbody>
+          ${(()=>{
+            const pls = rows.flatMap(r=>(r.porLaboratorio||[]));
+            if(pls.length===0) return '';
+            const colsTot = STATE.tiposConvenio.map(t=>{
+              const q = pls.reduce((s,pl)=>{ const pc=getPeriodoPorConvenio(pl); return s+((pc[t.key]&&pc[t.key].qtd)||0); },0);
+              const v = pls.reduce((s,pl)=>{ const pc=getPeriodoPorConvenio(pl); return s+((pc[t.key]&&pc[t.key].valor)||0); },0);
+              return `<td class="right"><b>${fmtNum(q)}</b></td><td class="right"><b>${fmtMoney(v)}</b></td>`;
+            }).join('');
+            return `<tfoot><tr>
+              <td colspan="4"><b>SOMA TOTAL (todos os períodos)</b></td>
+              ${colsTot}
+              <td class="right"><b>${fmtNum(pls.reduce((s,pl)=>s+(Number(pl.qtdCP)||0),0))}</b></td>
+              <td class="right"><b>${fmtNum(pls.reduce((s,pl)=>s+(Number(pl.qtdCR)||0),0))}</b></td>
+              <td class="right"><b>${fmtNum(pls.reduce((s,pl)=>s+(Number(pl.qtdTotal)||0),0))}</b></td>
+              <td class="right"><b>${fmtMoney(pls.reduce((s,pl)=>s+(Number(pl.valorTotal)||0),0))}</b></td>
+            </tr></tfoot>`;
+          })()}
         </table></div>
       </div>
     </div>
   `;
 }
+/* ============================================================
+   CONSOLIDADO → RELATÓRIOS DE GLOSAS
+   Acompanhamento de todos os Relatórios de Glosas já salvos no módulo Glosas,
+   pela numeração automática (ORDEM.MÊS.ANO) e pelo status atual do item 4 —
+   Cronograma de Recurso de Glosa. Esta tela apenas LÊ os relatórios salvos:
+   não altera glosas, lançamentos nem competências fechadas.
+   ============================================================ */
+let crgFiltro = { termo:'', status:'TODOS', ano:'TODOS', mes:'TODOS', lab:'TODOS' };
+function crgSet(campo, valor){ crgFiltro[campo] = valor; render(); }
+function viewRelatoriosGlosas(){
+  const f = crgFiltro;
+  const list = glosaRelatoriosFiltrados(f);
+  const somaFat   = list.reduce((s,r)=>s+((r.resumo&&r.resumo.faturado)||0),0);
+  const somaGlo   = list.reduce((s,r)=>s+((r.resumo&&r.resumo.glosado)||0),0);
+  const somaRec   = list.reduce((s,r)=>s+((r.resumo&&r.resumo.recuperavel)||0),0);
+  const indiceGer = somaFat>0 ? (somaGlo/somaFat*100) : 0;
+  const aberto = glosaRelatorioAberto ? glosaRelatorioPorId(glosaRelatorioAberto) : null;
+
+  const compTxt = (f.mes!=='TODOS' && f.ano!=='TODOS') ? competenciaLabel(f.mes, Number(f.ano))
+                : (f.ano!=='TODOS' ? `Ano ${f.ano}` : 'Todos os períodos');
+  const labTxt = f.lab==='TODOS' ? 'Todos os laboratórios/clínicas/operadoras' : f.lab;
+
+  /* Acompanhamento agrupado por status atual */
+  const porStatus = GLOSA_STATUS.map(s=>{
+    const doStatus = list.filter(r=>(r.status||'')===s);
+    return {
+      status: s,
+      qtd: doStatus.length,
+      glosado: doStatus.reduce((t,r)=>t+((r.resumo&&r.resumo.glosado)||0),0),
+      recuperavel: doStatus.reduce((t,r)=>t+((r.resumo&&r.resumo.recuperavel)||0),0),
+    };
+  });
+  const outros = list.filter(r=>!GLOSA_STATUS.includes(r.status||''));
+  if(outros.length) porStatus.push({
+    status:'(outros)', qtd: outros.length,
+    glosado: outros.reduce((t,r)=>t+((r.resumo&&r.resumo.glosado)||0),0),
+    recuperavel: outros.reduce((t,r)=>t+((r.resumo&&r.resumo.recuperavel)||0),0),
+  });
+
+  return `
+    <div class="grid cols-4" style="margin-bottom:16px;">
+      <div class="stat"><div class="label">Relatórios salvos</div><div class="value">${fmtNum(list.length)}</div></div>
+      <div class="stat"><div class="label">Valor total glosado</div><div class="value" style="color:var(--red);">${fmtMoney(somaGlo)}</div></div>
+      <div class="stat"><div class="label">Índice de glosa geral</div><div class="value" style="color:var(--amber);">${fmtPct(indiceGer)}</div></div>
+      <div class="stat"><div class="label">Valor recuperável (estimado)</div><div class="value" style="color:var(--green);">${fmtMoney(somaRec)}</div></div>
+    </div>
+
+    <div class="card">
+      <div class="flexrow">
+        <div>
+          <h2 style="margin:0;">⚠️ Acompanhamento dos Relatórios de Glosas</h2>
+          <div class="subtitle" style="margin-bottom:0;">Cada relatório é identificado pela numeração automática <b>ordem.mês.ano</b> (ex.: 001.08.2026) gerada no módulo Glosas. Filtre pelo <b>status atual</b> do item 4 — Cronograma de Recurso de Glosa.</div>
+        </div>
+        <button class="btn secondary small print-btn" onclick="printReportAsk('printRelGlosas','Acompanhamento dos Relatórios de Glosas')">🖨️ Imprimir</button>
+      </div>
+
+      <div class="formgrid" style="grid-template-columns:repeat(5,1fr);margin-top:12px;">
+        <div class="field"><label>Buscar</label><input value="${esc(f.termo)}" placeholder="Nº, laboratório ou competência" oninput="crgFiltro.termo=this.value;debouncedRender();"></div>
+        <div class="field"><label>Status atual</label><select onchange="crgSet('status',this.value)">
+          <option value="TODOS" ${f.status==='TODOS'?'selected':''}>Todos os status</option>
+          ${GLOSA_STATUS.map(s=>`<option value="${esc(s)}" ${f.status===s?'selected':''}>${esc(s)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Mês</label><select onchange="crgSet('mes',this.value)">
+          <option value="TODOS" ${f.mes==='TODOS'?'selected':''}>Todos</option>
+          ${MESES.map(m=>`<option value="${m}" ${f.mes===m?'selected':''}>${m}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Ano</label><select onchange="crgSet('ano',this.value)">
+          <option value="TODOS" ${f.ano==='TODOS'?'selected':''}>Todos</option>
+          ${glosaRelatoriosAnos().map(a=>`<option value="${esc(a)}" ${String(f.ano)===String(a)?'selected':''}>${esc(a)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Laboratório/Clínica/Operadora</label><select onchange="crgSet('lab',this.value)">
+          <option value="TODOS" ${f.lab==='TODOS'?'selected':''}>Todos</option>
+          ${glosaRelatoriosLabs().map(l=>`<option value="${esc(l)}" ${f.lab===l?'selected':''}>${esc(l)}</option>`).join('')}
+        </select></div>
+      </div>
+
+      <div id="printRelGlosas" style="margin-top:12px;">
+        ${reportHeaderHTML({convenio:'Todos os convênios', laboratorio:labTxt, vigencia:'—', competenciaText:compTxt, rotuloLaboratorio:'Laboratório/Clínica/Operadora'})}
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Nº do Relatório</th><th>Competência</th><th>Laboratório/Clínica/Operadora</th><th>Emitido em</th>
+            <th class="right">Valor Faturado</th><th class="right">Valor Glosado</th><th class="right">% Glosa</th><th class="right">Recuperável</th>
+            <th>Prazo Limite</th><th>Status Atual</th>
+          </tr></thead>
+          <tbody>
+            ${list.length===0 ? `<tr class="empty-row"><td colspan="10">Nenhum relatório de glosas salvo para este filtro. Salve um relatório no módulo <b>Glosas</b> (botão “💾 Salvar relatório de glosas”).</td></tr>` :
+              list.map(r=>{
+                const res = r.resumo||{};
+                return `<tr>
+                  <td><span class="glosa-num">${esc(r.numero)}</span></td>
+                  <td>${esc(r.competencia)}</td>
+                  <td>${esc(r.identificacao||r.laboratorio||'—')}</td>
+                  <td>${esc(r.emitidoEm ? new Date(r.emitidoEm).toLocaleDateString('pt-BR') : '—')}</td>
+                  <td class="right">${fmtMoney(res.faturado||0)}</td>
+                  <td class="right">${fmtMoney(res.glosado||0)}</td>
+                  <td class="right">${fmtPct(res.indice||0)}</td>
+                  <td class="right">${fmtMoney(res.recuperavel||0)}</td>
+                  <td>${esc(r.prazoLimite||'—')}</td>
+                  <td>${glosaStatusPill(r.status)}</td>
+                </tr>`;}).join('')}
+          </tbody>
+          ${list.length===0?'':`<tfoot><tr>
+            <td colspan="4"><b>SOMA TOTAL — ${fmtNum(list.length)} relatório(s)</b></td>
+            <td class="right"><b>${fmtMoney(somaFat)}</b></td>
+            <td class="right"><b>${fmtMoney(somaGlo)}</b></td>
+            <td class="right"><b>${fmtPct(indiceGer)}</b></td>
+            <td class="right"><b>${fmtMoney(somaRec)}</b></td>
+            <td colspan="2"></td>
+          </tr></tfoot>`}
+        </table></div>
+
+        <div class="section-title" style="margin-top:18px;">Situação por status do cronograma de recurso</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Status atual</th><th class="right">Relatórios</th><th class="right">Valor Glosado</th><th class="right">Recuperável</th></tr></thead>
+          <tbody>
+            ${porStatus.map(s=>`<tr>
+              <td>${glosaStatusPill(s.status)}</td>
+              <td class="right">${fmtNum(s.qtd)}</td>
+              <td class="right">${fmtMoney(s.glosado)}</td>
+              <td class="right">${fmtMoney(s.recuperavel)}</td>
+            </tr>`).join('')}
+          </tbody>
+          <tfoot><tr>
+            <td><b>SOMA TOTAL</b></td>
+            <td class="right"><b>${fmtNum(porStatus.reduce((s,x)=>s+x.qtd,0))}</b></td>
+            <td class="right"><b>${fmtMoney(porStatus.reduce((s,x)=>s+x.glosado,0))}</b></td>
+            <td class="right"><b>${fmtMoney(porStatus.reduce((s,x)=>s+x.recuperavel,0))}</b></td>
+          </tr></tfoot>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Abrir / reimprimir um relatório salvo</h2>
+      <div class="subtitle">Escolha o relatório pela numeração para ver a fotografia completa do que foi emitido e imprimir novamente. Para alterar o status de acompanhamento, use o módulo <b>Glosas → 🔎 Buscar relatórios de glosas</b>.</div>
+      <div class="formgrid">
+        <div class="field half"><label>Relatório</label><select onchange="glosaRelatorioAberto=this.value||null;render();">
+          <option value="">— selecione —</option>
+          ${list.map(r=>`<option value="${r.id}" ${glosaRelatorioAberto===r.id?'selected':''}>${esc(r.numero)} — ${esc(r.competencia)} — ${esc(r.identificacao||r.laboratorio||'todos')} — ${esc(r.status||'')}</option>`).join('')}
+        </select></div>
+      </div>
+      ${aberto ? `
+        <div class="flexrow" style="margin:14px 0 10px;">
+          <div class="subtitle" style="margin:0;">Status atual: ${glosaStatusPill(aberto.status)} · Prazo limite: <b>${esc(aberto.prazoLimite||'—')}</b></div>
+          <button class="btn secondary small print-btn" onclick="printReportAsk('glosaRelCons_${aberto.id}','Relatório de Glosas nº ${esc(aberto.numero)}')">🖨️ Imprimir este relatório</button>
+        </div>
+        ${glosaReportHTML(aberto, 'glosaRelCons_'+aberto.id)}
+      ` : ''}
+    </div>
+  `;
+}
+
 function fecharCompetencia(){
   if(!isMaster()){ showToast('Apenas o administrador pode fechar a competência.'); return; }
   if(STATE.lancamentos.length===0){ showToast('Não há lançamentos para fechar.'); return; }
@@ -4108,19 +4734,24 @@ function allLancamentosAllTime(){
   const hist = STATE.historico.flatMap(h => (h.lancamentos||[]).map(l=>({...l})));
   return hist.concat(STATE.lancamentos.map(l=>({...l})));
 }
+/* Lançamentos apenas dos laboratórios (ou clínicas/operadoras) do escopo em que o
+   módulo de relatórios está aberto — ver escopoDoLaboratorio(). */
+function lancamentosDoEscopo(){
+  return allLancamentosAllTime().filter(l=>escopoDoLaboratorio(l.laboratorio)===relEscopo);
+}
 function availableLabsInData(){
-  const set = new Set(STATE.labs.map(l=>l.nome));
-  allLancamentosAllTime().forEach(l=>set.add(l.laboratorio));
+  const set = new Set(STATE.labs.filter(l=>escopoDoLaboratorio(l.nome)===relEscopo).map(l=>l.nome));
+  lancamentosDoEscopo().forEach(l=>set.add(l.laboratorio));
   return Array.from(set).filter(Boolean).sort();
 }
 function availableYearsInData(){
-  const set = new Set(allLancamentosAllTime().map(l=>l.ano));
+  const set = new Set(lancamentosDoEscopo().map(l=>l.ano));
   set.add(STATE.competencia.ano);
   return Array.from(set).sort((a,b)=>a-b);
 }
 function customReportFiltered(){
   const f = customReportState;
-  let rows = allLancamentosAllTime();
+  let rows = lancamentosDoEscopo();
   if(f.lab!=='TODOS') rows = rows.filter(r=>r.laboratorio===f.lab);
   if(f.convenio!=='TODOS') rows = rows.filter(r=>r.convenio===f.convenio);
   if(f.mes!=='TODOS') rows = rows.filter(r=>r.competencia===f.mes);
@@ -4142,7 +4773,7 @@ function customReportFiltered(){
 function customReportHeaderInfo(){
   const f = customReportState;
   const convenioTxt = f.convenio==='TODOS' ? 'Todos os convênios' : convenioLabel(f.convenio);
-  const labTxt = f.lab==='TODOS' ? 'Todos os laboratórios' : f.lab;
+  const labTxt = f.lab==='TODOS' ? escopoRotuloTodos() : f.lab;
   const vigenciaTxt = (f.lab!=='TODOS' && f.convenio!=='TODOS') ? vigenciaFor(f.lab, cadastroValueFor(f.convenio)) : '—';
   const compTxt = (f.mes!=='TODOS' && f.ano!=='TODOS') ? competenciaLabel(f.mes, f.ano) : 'Todos os períodos';
   return {convenioTxt, labTxt, vigenciaTxt, compTxt};
@@ -4159,10 +4790,10 @@ function viewRelatorioPersonalizado(){
 
   return `
   <div class="card">
-    <h2>🧩 Relatório personalizado</h2>
-    <div class="subtitle">Monte o relatório do jeito que você precisar: filtre por laboratório, tipo de convênio, mês, ano, tipo de cota, ou busque por exame/paciente — funciona também sobre as competências já fechadas.</div>
+    <h2>🧩 Relatório personalizado — ${esc(escopoTituloModulo())}</h2>
+    <div class="subtitle">Monte o relatório do jeito que você precisar: filtre por ${esc(escopoRotuloSingular().toLowerCase())}, tipo de convênio, mês, ano, tipo de cota, ou busque por exame/paciente — funciona também sobre as competências já fechadas.</div>
     <div class="formgrid" style="grid-template-columns:repeat(6,1fr);">
-      <div class="field"><label>Laboratório</label><select onchange="crSet('lab',this.value);render();">
+      <div class="field"><label>${esc(escopoRotuloSingular())}</label><select onchange="crSet('lab',this.value);render();">
         <option value="TODOS" ${f.lab==='TODOS'?'selected':''}>Todos</option>${labsOpts}
       </select></div>
       <div class="field"><label>Convênio</label><select onchange="crSet('convenio',this.value);render();">
@@ -4188,7 +4819,7 @@ function viewRelatorioPersonalizado(){
       <div class="tab ${reportSubTab==='detalhado'?'active':''}" onclick="reportSubTab='detalhado';render();">📄 Detalhado</div>
       <div class="tab ${reportSubTab==='porExame'?'active':''}" onclick="reportSubTab='porExame';render();">🧾 Por Exame</div>
       <div class="tab ${reportSubTab==='porPaciente'?'active':''}" onclick="reportSubTab='porPaciente';render();">🙍 Por Paciente</div>
-      <div class="tab ${reportSubTab==='porLab'?'active':''}" onclick="reportSubTab='porLab';render();">🏥 Por Laboratório</div>
+      <div class="tab ${reportSubTab==='porLab'?'active':''}" onclick="reportSubTab='porLab';render();">🏥 Por ${esc(escopoRotuloSingular())}</div>
       <div class="tab ${reportSubTab==='porMes'?'active':''}" onclick="reportSubTab='porMes';render();">📅 Por Mês/Competência</div>
       <div class="tab ${reportSubTab==='porConvenio'?'active':''}" onclick="reportSubTab='porConvenio';render();">📁 Por Convênio</div>
     </div>
@@ -4196,13 +4827,13 @@ function viewRelatorioPersonalizado(){
     <div class="flexrow" style="margin:10px 0;">
       <div class="muted" style="font-size:12px;">${fmtNum(rows.length)} registro(s) encontrados · Qtd: <b>${fmtNum(totQtd)}</b> · Valor: <b>${fmtMoney(totValor)}</b></div>
       <div style="display:flex;gap:8px;">
-        <button class="btn secondary small print-btn" onclick="printReport('printCustomReport')">🖨️ Imprimir</button>
+        <button class="btn secondary small print-btn" onclick="printReportAsk('printCustomReport','Relatório personalizado — ${esc(escopoTituloModulo())}')">🖨️ Imprimir</button>
         <button class="btn secondary small" onclick="${reportSubTab==='porExame'?'exportPorExameXLSX()':'exportCustomReportCSV()'}">⭳ Exportar ${reportSubTab==='porExame'?'XLSX':'CSV'}</button>
       </div>
     </div>
 
     <div id="printCustomReport">
-      ${reportHeaderHTML({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt})}
+      ${reportHeaderHTML({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt, rotuloLaboratorio:escopoRotuloSingular()})}
       ${renderCustomReportTable(rows)}
     </div>
   </div>`;
@@ -4216,7 +4847,7 @@ function groupKeyFn(){
   return null;
 }
 function groupColLabel(){
-  return {porExame:'Exame', porPaciente:'Paciente', porLab:'Laboratório', porMes:'Competência', porConvenio:'Convênio'}[reportSubTab] || '';
+  return {porExame:'Exame', porPaciente:'Paciente', porLab:escopoRotuloSingular(), porMes:'Competência', porConvenio:'Convênio'}[reportSubTab] || '';
 }
 function round2(v){ return Math.round((v + Number.EPSILON) * 100) / 100; }
 function groupRows(rows){
@@ -4246,14 +4877,25 @@ function groupRows(rows){
 function renderCustomReportTable(rows){
   if(rows.length===0) return `<div class="helpbox">Nenhum registro encontrado para os filtros selecionados.</div>`;
   if(reportSubTab==='detalhado'){
+    const dTotQtd = rows.reduce((s,r)=>s+r.qtdExibida,0);
+    const dTotCP  = rows.reduce((s,r)=>s+(Number(r.qtdCP)||0),0);
+    const dTotCR  = rows.reduce((s,r)=>s+(Number(r.qtdCR)||0),0);
+    const dTotVal = rows.reduce((s,r)=>s+r.valorExibido,0);
     return `<div class="table-wrap"><table>
-      <thead><tr><th>Competência</th><th>Convênio</th><th>Laboratório</th><th>Paciente</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
+      <thead><tr><th>Competência</th><th>Convênio</th><th>${esc(escopoRotuloSingular())}</th><th>Paciente</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
       <tbody>${rows.map(r=>`<tr>
         <td>${esc(r.competencia)}/${esc(r.ano)}</td><td><span class="badge ${convenioBadge(r.convenio)}">${convenioLabel(r.convenio)}</span></td>
         <td>${esc(r.laboratorio)}</td><td>${esc(r.paciente)}</td><td class="right">${fmtMoney(r.valorUnit)}</td><td>${exameCellHTML(r.exameId, r.exameDescricao)}</td>
         <td class="right">${fmtNum(r.qtdExibida)}</td><td class="right">${fmtNum(r.qtdCP)}</td><td class="right">${fmtNum(r.qtdCR)}</td>
         <td class="right"><b>${fmtMoney(r.valorExibido)}</b></td>
       </tr>`).join('')}</tbody>
+      <tfoot><tr>
+        <td colspan="6"><b>SOMA TOTAL — ${fmtNum(rows.length)} registro(s)</b></td>
+        <td class="right"><b>${fmtNum(dTotQtd)}</b></td>
+        <td class="right"><b>${fmtNum(dTotCP)}</b></td>
+        <td class="right"><b>${fmtNum(dTotCR)}</b></td>
+        <td class="right"><b>${fmtMoney(dTotVal)}</b></td>
+      </tr></tfoot>
     </table></div>`;
   }
   const list = groupRows(rows);
@@ -4282,19 +4924,36 @@ function renderCustomReportTable(rows){
       </tr></tfoot>
     </table></div>`;
   }
+  /* Soma total do agrupamento — aparece na tela e também na impressão do relatório
+     (abas "Por Paciente", "Por Laboratório/Clínicas", "Por Mês/Competência" e "Por Convênio"). */
+  const gTotRegistros = list.reduce((s,g)=>s+g.registros,0);
+  const gTotQtd   = list.reduce((s,g)=>s+g.qtd,0);
+  const gTotCP    = list.reduce((s,g)=>s+g.qtdCP,0);
+  const gTotCR    = list.reduce((s,g)=>s+g.qtdCR,0);
+  const gTotValor = list.reduce((s,g)=>s+g.valor,0);
+  const gAvgUnit  = gTotQtd>0 ? (gTotValor/gTotQtd) : 0;
   return `<div class="table-wrap"><table>
     <thead><tr><th class="right">Vlr. Unit. (méd.)</th><th>${groupColLabel()}</th><th class="right">Registros</th><th class="right">Qtd</th><th class="right">Qtd C.P.</th><th class="right">Qtd C.R.</th><th class="right">Valor</th></tr></thead>
     <tbody>${list.map(g=>{ const avgUnit = g.qtd>0 ? (g.valor/g.qtd) : 0; return `<tr><td class="right">${fmtMoney(avgUnit)}</td><td><b>${esc(g.chave)}</b></td><td class="right">${fmtNum(g.registros)}</td><td class="right">${fmtNum(g.qtd)}</td><td class="right">${fmtNum(g.qtdCP)}</td><td class="right">${fmtNum(g.qtdCR)}</td><td class="right"><b>${fmtMoney(g.valor)}</b></td></tr>`; }).join('')}</tbody>
+    <tfoot><tr>
+      <td class="right">${fmtMoney(gAvgUnit)}</td>
+      <td><b>SOMA TOTAL — ${fmtNum(list.length)} linha(s)</b></td>
+      <td class="right"><b>${fmtNum(gTotRegistros)}</b></td>
+      <td class="right"><b>${fmtNum(gTotQtd)}</b></td>
+      <td class="right"><b>${fmtNum(gTotCP)}</b></td>
+      <td class="right"><b>${fmtNum(gTotCR)}</b></td>
+      <td class="right"><b>${fmtMoney(gTotValor)}</b></td>
+    </tr></tfoot>
   </table></div>`;
 }
 function exportCustomReportCSV(){
   const rows = customReportFiltered();
   if(rows.length===0){ showToast('Nada para exportar.'); return; }
   const {convenioTxt, labTxt, vigenciaTxt, compTxt} = customReportHeaderInfo();
-  const headerBlock = csvHeaderBlock({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt});
+  const headerBlock = csvHeaderBlock({convenio:convenioTxt, laboratorio:labTxt, vigencia:vigenciaTxt, competenciaText:compTxt, rotuloLaboratorio:escopoRotuloSingular()});
   let dataLines;
   if(reportSubTab==='detalhado'){
-    const header = ['Competencia','Ano','Convenio','Laboratorio','Paciente','Exame','Qtd','QtdCP','QtdCR','ValorUnit','ValorTotal'];
+    const header = ['Competencia','Ano','Convenio', relEscopo==='IMAGEM'?'Clinica/Operadora':'Laboratorio','Paciente','Exame','Qtd','QtdCP','QtdCR','ValorUnit','ValorTotal'];
     const rowLines = rows.map(r=>[
       csvEsc(r.competencia), r.ano, csvEsc(convenioLabel(r.convenio)), csvEsc(r.laboratorio), csvEsc(r.paciente), csvEsc(r.exameDescricao),
       r.qtdExibida, r.qtdCP, r.qtdCR, csvEsc(fmtMoney(r.valorUnit)), csvEsc(fmtMoney(r.valorExibido))
@@ -4317,7 +4976,7 @@ function exportCustomReportCSV(){
   const lines = headerBlock.concat(dataLines);
   const blob = new Blob(['\uFEFF'+lines.join('\n')], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download=`relatorio_personalizado_${reportSubTab}.csv`; a.click();
+  const a=document.createElement('a'); a.href=url; a.download=`relatorio_personalizado_${relEscopo==='IMAGEM'?'imagem_':''}${reportSubTab}.csv`; a.click();
   URL.revokeObjectURL(url);
 }
 
@@ -4328,7 +4987,7 @@ function slugPart(s){
 function buildPorExameFilename(){
   const f = customReportState;
   const convPart = f.convenio==='TODOS' ? 'TODOS_OS_CONVENIOS' : slugPart(convenioLabel(f.convenio));
-  const labPart = f.lab==='TODOS' ? 'TODOS_OS_LABORATORIOS' : slugPart(f.lab);
+  const labPart = f.lab==='TODOS' ? slugPart(escopoRotuloTodos()) : slugPart(f.lab);
   const compPart = (f.mes!=='TODOS' && f.ano!=='TODOS') ? `${slugPart(f.mes)}_${f.ano}` : 'TODOS_OS_PERIODOS';
   return `${convPart}_-_${labPart}_-_${compPart}_-_POR_EXAME.xlsx`;
 }
@@ -4365,7 +5024,7 @@ async function exportPorExameXLSX(){
   ws.getCell('A1').value = PREFEITURA_NOME;
   ws.getCell('A1').font = boldFont;
 
-  [['Convênio',convenioTxt],['Laboratório',labTxt],['Vigência',vigenciaTxt],['Competência',compTxt]].forEach((pair,i)=>{
+  [['Convênio',convenioTxt],[escopoRotuloSingular(),labTxt],['Vigência',vigenciaTxt],['Competência',compTxt]].forEach((pair,i)=>{
     const r = i+2;
     ws.getCell(`A${r}`).value = pair[0]; ws.getCell(`A${r}`).font = boldFont;
     ws.getCell(`B${r}`).value = pair[1]; ws.getCell(`B${r}`).font = boldFont;
