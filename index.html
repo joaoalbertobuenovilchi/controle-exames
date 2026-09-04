@@ -72,6 +72,39 @@ nav.navlist{display:flex;flex-direction:column;gap:3px;}
    duas linhas dentro do menu, em vez de ficarem cortados na lateral. */
 .navitem{line-height:1.3;word-break:break-word;}
 
+/* ---- Menu principal: campo de busca + grupos que abrem/fecham ----
+   O menu foi ficando comprido demais para caber na tela. Cada grupo agora abre e
+   fecha com um clique e o campo de busca filtra os módulos pelo nome. É só a forma
+   de apresentar: nenhum módulo foi retirado e nenhum dado é afetado. */
+.navsearch{position:relative;margin:0 2px 10px;}
+.navsearch input{
+  width:100%;padding:8px 26px 8px 29px;border-radius:8px;border:1px solid rgba(255,255,255,.18);
+  background:rgba(255,255,255,.08);color:#fff;font-size:12.5px;font-family:inherit;outline:none;
+  transition:var(--transition);-webkit-appearance:none;appearance:none;
+}
+.navsearch input::placeholder{color:rgba(255,255,255,.55);}
+.navsearch input::-webkit-search-cancel-button{display:none;}
+.navsearch input:focus{border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.14);}
+.navsearch .navsearch-ic{position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:12px;opacity:.7;pointer-events:none;}
+.navsearch .navsearch-x{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:12px;opacity:.6;cursor:pointer;background:none;border:0;color:#fff;padding:2px 4px;line-height:1;}
+.navsearch .navsearch-x:hover{opacity:1;}
+.navgroup{margin-bottom:1px;}
+.navgroup-head{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;user-select:none;
+  font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:rgba(255,255,255,.6);
+  transition:var(--transition);
+}
+.navgroup-head:hover{background:rgba(255,255,255,.09);color:#fff;}
+.navgroup-head .gic{font-size:13px;width:16px;min-width:16px;text-align:center;}
+.navgroup-head .gcount{font-size:9.5px;font-weight:700;opacity:.55;letter-spacing:0;}
+.navgroup-head .chev{margin-left:auto;font-size:9px;opacity:.7;transition:transform .18s ease;}
+.navgroup.open>.navgroup-head{color:#fff;}
+.navgroup.open>.navgroup-head .chev{transform:rotate(90deg);}
+.navgroup.has-active>.navgroup-head{color:#fff;background:rgba(255,255,255,.07);}
+.navgroup-items{display:none;flex-direction:column;gap:3px;padding:2px 0 8px 6px;margin-left:14px;border-left:1px solid rgba(255,255,255,.14);}
+.navgroup.open>.navgroup-items{display:flex;}
+.nav-vazio{font-size:11.5px;opacity:.6;padding:12px 10px;line-height:1.4;}
+
 .side-footer{margin-top:22px;padding:12px 10px;background:rgba(255,255,255,.08);border-radius:8px;font-size:11px;line-height:1.5;opacity:.85;}
 
 main{flex:1;min-width:0;padding:26px 34px 60px;}
@@ -435,6 +468,11 @@ body.com-rodape .sidebar{padding-bottom:40px;}
         <div class="brand-sub" id="brandFantasia">Prefeitura Municipal de Jaborandi</div>
       </div>
     </div>
+    <div class="navsearch">
+      <span class="navsearch-ic">🔎</span>
+      <input id="navBusca" type="search" placeholder="Buscar módulo…" autocomplete="off" oninput="setNavBusca(this.value)">
+      <button class="navsearch-x" id="navBuscaX" onclick="limparNavBusca()" title="Limpar busca" style="display:none;">✕</button>
+    </div>
     <nav class="navlist" id="navlist"></nav>
     <div class="side-footer">
       <div id="sidebarUsuarioLogado" style="font-weight:700;margin-bottom:4px;"></div>
@@ -560,7 +598,10 @@ let usersLoaded = false;
                  imprimir tudo, e só pode INSERIR dados nos módulos
                  Lançar Exames, Emissão de N.F. e Comparativo entre Laboratórios.
    ============================================================ */
-const DIGITADOR_VIEWS_PERMITIDAS = ['lancamento','nf','comparativo','glosas'];
+/* 'configGlosas' entra aqui porque os motivos, justificativas, plano de ação e cronograma
+   já eram editáveis pelo digitador quando ficavam dentro do módulo Glosas — só mudaram
+   de lugar na tela, o direito de acesso continua exatamente o mesmo. */
+const DIGITADOR_VIEWS_PERMITIDAS = ['lancamento','nf','comparativo','glosas','configGlosas'];
 function perfilAtual(){ return currentUser ? (currentUser.perfil || (currentUser.master ? 'master':'comum')) : null; }
 function isMaster(){ return perfilAtual()==='master'; }
 function isDigitador(){ return perfilAtual()==='digitador'; }
@@ -842,10 +883,15 @@ function trocarCodigoAcesso(){
      3.25.2026  03/09/2026      responsável pelo faturamento vindo do cadastro do
                                 laboratório, rodapé com versão/usuário/CNPJ e
                                 botão de fechar na tela de acesso
+     3.26.2026  04/09/2026      módulo Glosas renomeado para "Lançamento de Glosas",
+                                cronograma/motivos/justificativas/plano de ação movidos
+                                para Cadastros → "Configurar Glosas" (renumerados 1, 2 e 3
+                                na ordem de preenchimento da tela), e menu principal
+                                com grupos recolhíveis e busca de módulos
    ============================================================ */
 const APP_CRIACAO = { mes: 7, ano: 2026 };   // julho/2026 = mês 1
-const APP_ALTERACAO = 25;                     // nº acumulado de alterações publicadas
-const APP_DATA = '2026-09-03';                // data desta versão (AAAA-MM-DD)
+const APP_ALTERACAO = 26;                     // nº acumulado de alterações publicadas
+const APP_DATA = '2026-09-04';                // data desta versão (AAAA-MM-DD)
 function appVersao(){
   const p = APP_DATA.split('-').map(Number);
   const ano = p[0], mes = p[1];
@@ -1471,6 +1517,7 @@ const NAV_BASE = [
     {id:'labs', label:'Laboratórios/Clínicas/Operadoras', icon:'🏥'},
     {id:'exames', label:'Exames', icon:'🧾'},
     {id:'tiposConvenio', label:'Tipos de Convênio/Processo', icon:'📁'},
+    {id:'configGlosas', label:'Configurar Glosas', icon:'⚙️'},
   ]},
   {group:'2. Conferência', items:[
     {id:'comparativo', label:'Comparativo entre Laboratórios', icon:'🔍'},
@@ -1482,7 +1529,7 @@ const NAV_BASE = [
     {id:'nf', label:'Emissão de N.F.', icon:'💵'},
   ]},
   {group:'5. Glosas', items:[
-    {id:'glosas', label:'Glosas', icon:'⚠️'},
+    {id:'glosas', label:'Lançamento de Glosas', icon:'⚠️'},
   ]},
   {group:'6. Consolidado', items:[
     {id:'relatorios', label:'Relatórios de Exames Laboratoriais', icon:'🧪'},
@@ -1505,10 +1552,11 @@ const PAGE_META = {
   labs:['Cadastro de Laboratórios/Clínicas/Operadoras','Cadastre os laboratórios, clínicas e operadoras conveniados, o responsável (gestor/diretor) e os contatos.'],
   exames:['Cadastro de Exames','Defina exames, cotas (principal/reserva) e valor unitário por laboratório e convênio.'],
   tiposConvenio:['Tipos de Convênio/Processo','Cadastre, altere o nome ou exclua os tipos de convênio/processo usados em todo o sistema.'],
+  configGlosas:['Configurar Glosas','Cronograma de recurso, motivos, justificativas e plano de ação — a base que alimenta o Lançamento de Glosas e o Relatório de Glosas.'],
   lancamento:['Lançamento de Exames','Registre os exames realizados por paciente, por tipo de convênio/processo.'],
   nf:['Emissão de N.F.','Resumo de quantidades e valores para solicitar as notas fiscais dos laboratórios.'],
   comparativo:['Comparativo entre Laboratórios','Importe o arquivo do laboratório principal e do laboratório terceirizado e veja o relatório de inconsistências.'],
-  glosas:['Glosas','Registre as glosas por convênio/operadora, os motivos, as justificativas e o plano de ação — e emita o Relatório de Glosas.'],
+  glosas:['Lançamento de Glosas','Lance as glosas por convênio/operadora e emita o Relatório de Glosas. Motivos, justificativas, plano de ação e cronograma ficam em Cadastros → Configurar Glosas.'],
   relatorios:['Consolidado — Relatórios de Exames Laboratoriais','Consolidado dos exames realizados pelos laboratórios, em todas as competências já fechadas.'],
   relatoriosImagem:['Consolidado — Relatórios de Exames de Imagem','Mesmo conjunto de relatórios, considerando apenas as clínicas/operadoras cadastradas (exames de imagem).'],
   relatoriosGlosas:['Consolidado — Relatórios de Glosas','Acompanhamento dos relatórios de glosas já emitidos, pela numeração e pelo status do cronograma de recurso.'],
@@ -1516,23 +1564,119 @@ const PAGE_META = {
   logAcesso:['Log de Acesso','Veja quem usou o sistema: usuário, data, hora início, hora final e comandos acessados. Apenas o administrador (master) vê este módulo.'],
 };
 
+/* ---------------- Menu principal: grupos recolhíveis e busca ----------------
+   Antes o menu listava todos os módulos de uma vez e ficava mais alto que a tela.
+   Agora cada grupo abre/fecha com um clique (a preferência fica só no navegador,
+   em localStorage — nada disso vai para os dados do sistema) e o campo de busca
+   filtra os módulos pelo nome, ignorando acentos e maiúsculas. */
+const NAV_ABERTOS_KEY = 'ce_nav_grupos_abertos';
+let navBusca = '';
+let navGruposAbertos = null;  // Set com os nomes dos grupos abertos
+
+/* Ícone do grupo, escolhido pelo próprio nome — sem alterar a estrutura do NAV */
+function navGrupoIcone(nome){
+  const n = normTxt(nome);
+  if(n.includes('VISAO GERAL')) return '📊';
+  if(n.includes('CADASTRO')) return '🗂️';
+  if(n.includes('CONFERENCIA')) return '🔍';
+  if(n.includes('LANCAMENTO')) return '✍️';
+  if(n.includes('FATURAMENTO')) return '💵';
+  if(n.includes('GLOSA')) return '⚠️';
+  if(n.includes('CONSOLIDADO')) return '📈';
+  if(n.includes('ADMINISTRACAO')) return '🔐';
+  return '📁';
+}
+function navGruposAbertosSet(){
+  if(navGruposAbertos) return navGruposAbertos;
+  let salvos = null;
+  try{ salvos = JSON.parse(localStorage.getItem(NAV_ABERTOS_KEY) || 'null'); }catch(e){}
+  if(Array.isArray(salvos)){
+    navGruposAbertos = new Set(salvos);
+  } else {
+    // Primeiro acesso: abre só o grupo do módulo em que o usuário está.
+    navGruposAbertos = new Set();
+    const g = getNav().find(x=>x.items.some(it=>it.id===currentView));
+    if(g) navGruposAbertos.add(g.group);
+  }
+  return navGruposAbertos;
+}
+function navSalvarGruposAbertos(){
+  try{ localStorage.setItem(NAV_ABERTOS_KEY, JSON.stringify(Array.from(navGruposAbertosSet()))); }catch(e){}
+}
+function toggleNavGrupo(nome){
+  const abertos = navGruposAbertosSet();
+  if(abertos.has(nome)) abertos.delete(nome); else abertos.add(nome);
+  navSalvarGruposAbertos();
+  renderNav();
+}
+function abrirGrupoDoModulo(view){
+  const g = getNav().find(x=>x.items.some(it=>it.id===view));
+  if(g && !navGruposAbertosSet().has(g.group)){
+    navGruposAbertosSet().add(g.group);
+    navSalvarGruposAbertos();
+  }
+}
+function setNavBusca(v){ navBusca = v; renderNav(); }
+function limparNavBusca(){
+  navBusca = '';
+  const el = document.getElementById('navBusca');
+  if(el){ el.value = ''; el.focus(); }
+  renderNav();
+}
 function renderNav(){
   const nav = document.getElementById('navlist');
-  nav.innerHTML = getNav().map(g=>`
-    <div class="navgroup-label">${g.group}</div>
-    ${g.items.map(it=>`<div class="navitem ${currentView===it.id?'active':''}" onclick="goto('${it.id}')"><span class="ic">${it.icon}</span>${it.label}</div>`).join('')}
-  `).join('');
+  const termo = normTxt(navBusca);
+  const abertos = navGruposAbertosSet();
+
+  // Durante a busca, mostra só o que casa com o texto digitado — e já abre os grupos.
+  const grupos = getNav()
+    .map(g=>({
+      group: g.group,
+      items: termo
+        ? g.items.filter(it=> normTxt(it.label).includes(termo) || normTxt(g.group).includes(termo))
+        : g.items
+    }))
+    .filter(g=>g.items.length>0);
+
+  nav.innerHTML = grupos.length===0
+    ? `<div class="nav-vazio">Nenhum módulo encontrado para “${esc(navBusca)}”.</div>`
+    : grupos.map(g=>{
+        const temAtivo = g.items.some(it=>it.id===currentView);
+        // Durante a busca todos os grupos com resultado ficam abertos; fora dela vale a
+        // escolha do usuário (o grupo do módulo aberto entra sozinho em goto()).
+        const aberto = !!termo || abertos.has(g.group);
+        return `
+    <div class="navgroup ${aberto?'open':''} ${temAtivo?'has-active':''}">
+      <div class="navgroup-head" onclick="toggleNavGrupo('${esc(g.group).replace(/'/g,"\\'")}')" title="Clique para abrir ou fechar este grupo">
+        <span class="gic">${navGrupoIcone(g.group)}</span>
+        <span>${esc(g.group)}</span>
+        <span class="gcount">${g.items.length}</span>
+        <span class="chev">▶</span>
+      </div>
+      <div class="navgroup-items">
+        ${g.items.map(it=>`<div class="navitem ${currentView===it.id?'active':''}" onclick="goto('${it.id}')"><span class="ic">${it.icon}</span>${it.label}</div>`).join('')}
+      </div>
+    </div>`;
+      }).join('');
+
+  const x = document.getElementById('navBuscaX');
+  if(x) x.style.display = navBusca ? '' : 'none';
   const userEl = document.getElementById('sidebarUsuarioLogado');
   if(userEl) userEl.textContent = currentUser ? ('👤 '+(currentUser.nome||currentUser.usuario)+' — '+perfilLabel(perfilAtual())) : '';
 }
 function goto(view){
   if((view==='usuarios' || view==='logAcesso') && !isMaster()) view = 'dashboard';
   currentView = view;
+  abrirGrupoDoModulo(view);
   document.getElementById('pageTitle').textContent = PAGE_META[view][0];
   document.getElementById('pageDesc').textContent = PAGE_META[view][1];
   document.getElementById('sidebar').classList.remove('open');
   const bd = document.getElementById('sidebarBackdrop');
   if(bd) bd.classList.remove('open');
+  // Depois de escolher o módulo, o filtro de busca do menu se limpa sozinho.
+  navBusca = '';
+  const buscaEl = document.getElementById('navBusca');
+  if(buscaEl) buscaEl.value = '';
   renderNav();
   registrarComando(PAGE_META[view][0]);
   render();
@@ -1545,6 +1689,7 @@ function render(){
   if(currentView==='dashboard') v.innerHTML = viewDashboard();
   else if(currentView==='entidade') v.innerHTML = viewEntidade();
   else if(currentView==='glosas') v.innerHTML = viewGlosas();
+  else if(currentView==='configGlosas') v.innerHTML = viewConfigGlosas();
   else if(currentView==='labs') v.innerHTML = viewLabs();
   else if(currentView==='exames') v.innerHTML = viewExames();
   else if(currentView==='tiposConvenio') v.innerHTML = viewTiposConvenio();
@@ -1556,7 +1701,7 @@ function render(){
   else if(currentView==='relatoriosGlosas') v.innerHTML = viewRelatoriosGlosas();
   else if(currentView==='usuarios') v.innerHTML = viewUsuarios();
   else if(currentView==='logAcesso') v.innerHTML = viewLogAcesso();
-  const VIEWS_COM_FORM = ['entidade','labs','exames','tiposConvenio','lancamento','comparativo','glosas','relatorios','relatoriosImagem','relatoriosGlosas'];
+  const VIEWS_COM_FORM = ['entidade','labs','exames','tiposConvenio','configGlosas','lancamento','comparativo','glosas','relatorios','relatoriosImagem','relatoriosGlosas'];
   if(!podeEditar(currentView) && VIEWS_COM_FORM.includes(currentView)){
     v.insertAdjacentHTML('afterbegin', `<div class="read-only-notice">🔒 Seu perfil de acesso (${esc(perfilLabel(perfilAtual()))}) permite apenas visualizar e imprimir este módulo.</div>`);
   }
@@ -2411,7 +2556,7 @@ function prazoLimiteRecurso(){
   return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
 }
 function saveGlosaCfg(){
-  if(semPermissao('glosas')) return;
+  if(semPermissao('configGlosas')) return;
   const cfg = glosaCfg();
   cfg.dataFaturamento = document.getElementById('gcData').value;
   cfg.prazoDias = Math.max(0, Math.round(Number(document.getElementById('gcPrazo').value)||0));
@@ -2640,7 +2785,7 @@ function deleteGlosa(id){
 
 /* ---------------- Motivos de glosa (visão geral) ---------------- */
 function saveMotivoGlosa(){
-  if(semPermissao('glosas')) return;
+  if(semPermissao('configGlosas')) return;
   const texto = document.getElementById('gmTexto').value.trim();
   if(!texto){ showToast('Descreva o motivo da glosa.'); return; }
   const categoria = document.getElementById('gmCategoria').value;
@@ -2654,10 +2799,10 @@ function saveMotivoGlosa(){
     saveState(); render(); showToast('Motivo cadastrado.','success');
   }
 }
-function editMotivoGlosa(id){ if(semPermissao('glosas')) return; editingMotivoId=id; render(); const el=document.getElementById('gmTexto'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }
+function editMotivoGlosa(id){ if(semPermissao('configGlosas')) return; editingMotivoId=id; render(); const el=document.getElementById('gmTexto'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }
 function cancelEditMotivoGlosa(){ editingMotivoId=null; render(); }
 function deleteMotivoGlosa(id){
-  if(semPermissao('glosas')) return;
+  if(semPermissao('configGlosas')) return;
   if(!confirm('Excluir este motivo de glosa?')) return;
   STATE.glosaMotivos = STATE.glosaMotivos.filter(m=>m.id!==id);
   if(editingMotivoId===id) editingMotivoId=null;
@@ -2666,7 +2811,7 @@ function deleteMotivoGlosa(id){
 
 /* ---------------- Justificativas da glosa ---------------- */
 function saveJustifGlosa(){
-  if(semPermissao('glosas')) return;
+  if(semPermissao('configGlosas')) return;
   const texto = document.getElementById('gjTexto').value.trim();
   if(!texto){ showToast('Descreva a justificativa.'); return; }
   if(editingJustifId){
@@ -2679,10 +2824,10 @@ function saveJustifGlosa(){
     saveState(); render(); showToast('Justificativa cadastrada.','success');
   }
 }
-function editJustifGlosa(id){ if(semPermissao('glosas')) return; editingJustifId=id; render(); const el=document.getElementById('gjTexto'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }
+function editJustifGlosa(id){ if(semPermissao('configGlosas')) return; editingJustifId=id; render(); const el=document.getElementById('gjTexto'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }
 function cancelEditJustifGlosa(){ editingJustifId=null; render(); }
 function deleteJustifGlosa(id){
-  if(semPermissao('glosas')) return;
+  if(semPermissao('configGlosas')) return;
   if(!confirm('Excluir esta justificativa?')) return;
   STATE.glosaJustificativas = STATE.glosaJustificativas.filter(j=>j.id!==id);
   if(editingJustifId===id) editingJustifId=null;
@@ -2691,7 +2836,7 @@ function deleteJustifGlosa(id){
 
 /* ---------------- Plano de ação (curto / médio / longo prazo) ---------------- */
 function saveAcaoGlosa(){
-  if(semPermissao('glosas')) return;
+  if(semPermissao('configGlosas')) return;
   const texto = document.getElementById('gaTexto').value.trim();
   if(!texto){ showToast('Descreva a ação.'); return; }
   const prazo = document.getElementById('gaPrazo').value;
@@ -2706,23 +2851,159 @@ function saveAcaoGlosa(){
     saveState(); render(); showToast('Ação cadastrada.','success');
   }
 }
-function editAcaoGlosa(id){ if(semPermissao('glosas')) return; editingAcaoId=id; render(); const el=document.getElementById('gaTexto'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }
+function editAcaoGlosa(id){ if(semPermissao('configGlosas')) return; editingAcaoId=id; render(); const el=document.getElementById('gaTexto'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }
 function cancelEditAcaoGlosa(){ editingAcaoId=null; render(); }
 function deleteAcaoGlosa(id){
-  if(semPermissao('glosas')) return;
+  if(semPermissao('configGlosas')) return;
   if(!confirm('Excluir esta ação do plano de ação?')) return;
   STATE.glosaPlanoAcao = STATE.glosaPlanoAcao.filter(a=>a.id!==id);
   if(editingAcaoId===id) editingAcaoId=null;
   saveState(); render();
 }
 
-/* ---------------- Tela do módulo Glosas ---------------- */
-function viewGlosas(){
+/* ---------------- Tela do módulo Cadastros → Configurar Glosas ----------------
+   Reúne o que antes ficava dentro do módulo Glosas e que, na verdade, é CADASTRO:
+     · 1. Cronograma de recurso de glosa   (STATE.glosaConfig, por competência)
+     · 2. Motivos de glosa (visão geral)   (STATE.glosaMotivos)
+     ·    Justificativas das glosas        (STATE.glosaJustificativas)
+     · 3. Plano de ação para prevenção e redução de glosas (STATE.glosaPlanoAcao)
+   A numeração aqui é a ordem de preenchimento DESTA tela (1, 2, 3). Ela é diferente,
+   de propósito, da numeração do Relatório de Glosas — lá estes mesmos cadastros
+   continuam saindo como itens 3, 4 e 5, que é o formato oficial do documento.
+   Nada foi copiado nem duplicado: são exatamente as mesmas listas do STATE, com as
+   mesmas funções de gravação. Tudo continua interligado — o Lançamento de Glosas usa
+   os motivos como sugestão, e o Relatório de Glosas (aqui, no lançamento e nos
+   relatórios já salvos) continua montando os itens 3, 4 e 5 a partir destes cadastros.
+   A competência escolhida aqui é a MESMA do módulo Lançamento de Glosas (glosaComp). */
+function viewConfigGlosas(){
   const cfg = glosaCfg();
-  const editing = editingGlosaId ? STATE.glosas.find(g=>g.id===editingGlosaId) : null;
   const editMot = editingMotivoId ? STATE.glosaMotivos.find(m=>m.id===editingMotivoId) : null;
   const editJus = editingJustifId ? STATE.glosaJustificativas.find(j=>j.id===editingJustifId) : null;
   const editAca = editingAcaoId ? STATE.glosaPlanoAcao.find(a=>a.id===editingAcaoId) : null;
+
+  return `
+    <div class="helpbox">Estes cadastros alimentam o módulo <b>Glosas → Lançamento de Glosas</b> e os itens <b>3</b>, <b>4</b> e <b>5</b> do Relatório de Glosas. Os motivos cadastrados aqui aparecem como sugestão na hora de lançar cada glosa.</div>
+
+    <div class="card">
+      <div class="flexrow" style="flex-wrap:wrap;gap:8px;">
+        <div class="field" style="flex:1;min-width:240px;">
+          <label>Competência do cronograma</label>
+          <select onchange="setGlosaComp(this.value)">
+            ${glosaCompetenciaOptions().map(o=>`<option value="${o.id}" ${glosaComp===o.id?'selected':''}>${esc(o.label)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="align-self:end;">
+          <button class="btn secondary small" onclick="goto('glosas')">⚠️ Ir para o Lançamento de Glosas</button>
+        </div>
+      </div>
+      <div class="muted" style="font-size:11.5px;margin-top:8px;">Motivos, justificativas e plano de ação valem para todo o sistema. Só o <b>cronograma de recurso</b> é guardado por competência — a competência escolhida acima é a mesma usada no Lançamento de Glosas.</div>
+    </div>
+
+    <div class="card edit-only">
+      <h2>1. Cronograma de recurso de glosa</h2>
+      <div class="subtitle">O prazo limite é calculado somando os dias informados à data do faturamento (dias corridos). Estes parâmetros valem para a competência ${esc(glosaCompKey())}. Sai como <b>item 4</b> do Relatório de Glosas.</div>
+      <div class="formgrid">
+        <div class="field"><label>Data do faturamento</label><input type="date" id="gcData" value="${esc(cfg.dataFaturamento||'')}"></div>
+        <div class="field"><label>Prazo para envio do recurso (dias)</label><input type="number" min="0" step="1" id="gcPrazo" value="${esc(cfg.prazoDias)}" placeholder="Ex: 15"></div>
+        <div class="field"><label>Status atual</label><select id="gcStatus">
+          ${GLOSA_STATUS.map(s=>`<option value="${esc(s)}" ${cfg.status===s?'selected':''}>${esc(s)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Prazo limite calculado</label><input value="${esc(prazoLimiteRecurso())}" disabled></div>
+      </div>
+      <div style="margin-top:14px;"><button class="btn" onclick="saveGlosaCfg()">💾 Salvar cronograma</button></div>
+    </div>
+
+    <div class="card edit-only">
+      <h2>2. Motivos de glosa (visão geral)</h2>
+      <div class="subtitle">Lista que aparece no item 3 do relatório, dividida em <b>Administrativas</b> e <b>Técnicas/Médicas</b>. Também alimenta a sugestão de motivos no Lançamento de Glosas.</div>
+      <div class="formgrid">
+        <div class="field"><label>Tipo</label><select id="gmCategoria">
+          ${GLOSA_CATEGORIAS.map(c=>`<option value="${c.key}" ${editMot && editMot.categoria===c.key?'selected':''}>${esc(c.label)}</option>`).join('')}
+        </select></div>
+        <div class="field" style="grid-column:span 3;"><label>Motivo</label><input id="gmTexto" placeholder="Ex: Número de carteirinha do beneficiário inválido ou vencido." value="${editMot?esc(editMot.texto):''}"></div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;">
+        ${editMot
+          ? `<button class="btn" onclick="saveMotivoGlosa()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditMotivoGlosa()">Cancelar</button>`
+          : `<button class="btn" onclick="saveMotivoGlosa()">+ Adicionar motivo</button>`}
+      </div>
+      <div class="table-wrap" style="margin-top:14px;"><table>
+        <thead><tr><th style="width:22%;">Tipo</th><th>Motivo</th><th></th></tr></thead>
+        <tbody>
+          ${STATE.glosaMotivos.length===0 ? `<tr class="empty-row"><td colspan="3">Nenhum motivo cadastrado.</td></tr>` :
+            STATE.glosaMotivos.map(m=>`
+            <tr>
+              <td>${esc(glosaCategoriaLabel(m.categoria))}</td>
+              <td>${esc(m.texto)}</td>
+              <td><button class="btn ghost small" onclick="editMotivoGlosa('${m.id}')">✏️ editar</button>
+                  <button class="btn ghost small" onclick="deleteMotivoGlosa('${m.id}')">🗑 excluir</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="card edit-only">
+      <h2>Justificativas das glosas</h2>
+      <div class="subtitle">Texto corrido que aparece no relatório logo depois dos motivos.</div>
+      <div class="formgrid">
+        <div class="field wide"><label>Justificativa</label><textarea id="gjTexto" placeholder="Ex: As guias glosadas foram reapresentadas com o pedido médico original digitalizado em anexo.">${editJus?esc(editJus.texto):''}</textarea></div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;">
+        ${editJus
+          ? `<button class="btn" onclick="saveJustifGlosa()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditJustifGlosa()">Cancelar</button>`
+          : `<button class="btn" onclick="saveJustifGlosa()">+ Adicionar justificativa</button>`}
+      </div>
+      <div class="table-wrap" style="margin-top:14px;"><table>
+        <thead><tr><th>Justificativa</th><th></th></tr></thead>
+        <tbody>
+          ${STATE.glosaJustificativas.length===0 ? `<tr class="empty-row"><td colspan="2">Nenhuma justificativa cadastrada.</td></tr>` :
+            STATE.glosaJustificativas.map(j=>`
+            <tr>
+              <td>${esc(j.texto)}</td>
+              <td><button class="btn ghost small" onclick="editJustifGlosa('${j.id}')">✏️ editar</button>
+                  <button class="btn ghost small" onclick="deleteJustifGlosa('${j.id}')">🗑 excluir</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="card edit-only">
+      <h2>3. Plano de ação para prevenção e redução de glosas</h2>
+      <div class="subtitle">Dividido em <b>ação de curto prazo</b>, <b>ação de médio prazo</b> e <b>ação de longo prazo</b>. Sai como <b>item 5</b> do Relatório de Glosas.</div>
+      <div class="formgrid">
+        <div class="field"><label>Prazo</label><select id="gaPrazo">
+          ${GLOSA_PRAZOS.map(p=>`<option value="${p.key}" ${editAca && editAca.prazo===p.key?'selected':''}>${esc(p.label)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Responsável / setor</label><input id="gaResponsavel" placeholder="Ex: Recepção" value="${editAca?esc(editAca.responsavel||''):''}"></div>
+        <div class="field half"><label>Ação</label><input id="gaTexto" placeholder="Ex: Treinar a equipe de atendimento para validar a assinatura do paciente." value="${editAca?esc(editAca.texto):''}"></div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;">
+        ${editAca
+          ? `<button class="btn" onclick="saveAcaoGlosa()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditAcaoGlosa()">Cancelar</button>`
+          : `<button class="btn" onclick="saveAcaoGlosa()">+ Adicionar ação</button>`}
+      </div>
+      <div class="table-wrap" style="margin-top:14px;"><table>
+        <thead><tr><th style="width:22%;">Prazo</th><th style="width:20%;">Responsável / setor</th><th>Ação</th><th></th></tr></thead>
+        <tbody>
+          ${STATE.glosaPlanoAcao.length===0 ? `<tr class="empty-row"><td colspan="4">Nenhuma ação cadastrada.</td></tr>` :
+            STATE.glosaPlanoAcao.map(a=>`
+            <tr>
+              <td>${esc(glosaPrazoLabel(a.prazo))}</td>
+              <td>${esc(a.responsavel||'')||'—'}</td>
+              <td>${esc(a.texto)}</td>
+              <td><button class="btn ghost small" onclick="editAcaoGlosa('${a.id}')">✏️ editar</button>
+                  <button class="btn ghost small" onclick="deleteAcaoGlosa('${a.id}')">🗑 excluir</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+/* ---------------- Tela do módulo Glosas → Lançamento de Glosas ---------------- */
+function viewGlosas(){
+  const cfg = glosaCfg();
+  const editing = editingGlosaId ? STATE.glosas.find(g=>g.id===editingGlosaId) : null;
   const labs = glosaLabsAvailable();
   const lista = glosasFiltradas();
   const resumo = glosaResumoFinanceiro();
@@ -2776,18 +3057,23 @@ function viewGlosas(){
 
     <div class="helpbox">Os valores faturados, a quantidade de procedimentos e os nomes dos exames saem dos <b>lançamentos já registrados no sistema</b> para a competência <b>${esc(glosaCompetenciaLabelText())}</b>. Registre abaixo o que foi glosado e o relatório no final da página é montado automaticamente.</div>
 
-    <div class="card edit-only">
-      <h2>4. Cronograma de recurso de glosa</h2>
-      <div class="subtitle">O prazo limite é calculado somando os dias informados à data do faturamento (dias corridos). Estes parâmetros valem para a competência ${esc(glosaCompKey())}.</div>
-      <div class="formgrid">
-        <div class="field"><label>Data do faturamento</label><input type="date" id="gcData" value="${esc(cfg.dataFaturamento||'')}"></div>
-        <div class="field"><label>Prazo para envio do recurso (dias)</label><input type="number" min="0" step="1" id="gcPrazo" value="${esc(cfg.prazoDias)}" placeholder="Ex: 15"></div>
-        <div class="field"><label>Status atual</label><select id="gcStatus">
-          ${GLOSA_STATUS.map(s=>`<option value="${esc(s)}" ${cfg.status===s?'selected':''}>${esc(s)}</option>`).join('')}
-        </select></div>
-        <div class="field"><label>Prazo limite calculado</label><input value="${esc(prazoLimiteRecurso())}" disabled></div>
+    <!-- Resumo do que está configurado em Cadastros → Configurar Glosas. Os dados são os
+         mesmos (STATE.glosaConfig / glosaMotivos / glosaJustificativas / glosaPlanoAcao):
+         aqui eles só aparecem em forma de resumo, e o botão leva para a tela de cadastro. -->
+    <div class="card">
+      <div class="flexrow" style="flex-wrap:wrap;gap:8px;">
+        <div>
+          <h2 style="margin:0;">⚙️ Configuração das glosas — ${esc(glosaCompKey())}</h2>
+          <div class="subtitle" style="margin-bottom:0;">Cadastrada em <b>Cadastros → Configurar Glosas</b> e usada por este lançamento e pelo relatório.</div>
+        </div>
+        <button class="btn secondary small" onclick="goto('configGlosas')">⚙️ Configurar glosas</button>
       </div>
-      <div style="margin-top:14px;"><button class="btn" onclick="saveGlosaCfg()">💾 Salvar cronograma</button></div>
+      <div class="grid cols-4" style="margin-top:12px;">
+        <div class="stat"><div class="label">Prazo limite do recurso</div><div class="value" style="font-size:17px;">${esc(prazoLimiteRecurso())}</div><div class="muted" style="font-size:11px;">Faturamento ${esc(fmtDateBR(cfg.dataFaturamento))} + ${esc(cfg.prazoDias)} dias</div></div>
+        <div class="stat"><div class="label">Status do cronograma</div><div class="value" style="font-size:15px;">${glosaStatusPill(cfg.status)}</div></div>
+        <div class="stat"><div class="label">Motivos cadastrados</div><div class="value">${fmtNum(STATE.glosaMotivos.length)}</div><div class="muted" style="font-size:11px;">sugeridos ao lançar a glosa</div></div>
+        <div class="stat"><div class="label">Justificativas / ações</div><div class="value">${fmtNum(STATE.glosaJustificativas.length)} / ${fmtNum(STATE.glosaPlanoAcao.length)}</div><div class="muted" style="font-size:11px;">itens 3, 4 e 5 do relatório</div></div>
+      </div>
     </div>
 
     <div class="card edit-only" id="cardNovaGlosa" style="${(glosaFormAberto||editing)?'':'display:none;'}">
@@ -2847,91 +3133,6 @@ function viewGlosas(){
                 <button class="btn ghost small" onclick="editGlosa('${g.id}')">✏️ editar</button>
                 <button class="btn ghost small" onclick="deleteGlosa('${g.id}')">🗑 excluir</button>
               </td>
-            </tr>`).join('')}
-        </tbody>
-      </table></div>
-    </div>
-
-    <div class="card edit-only">
-      <h2>3. Motivos de glosa (visão geral)</h2>
-      <div class="subtitle">Lista que aparece no item 3 do relatório, dividida em <b>Administrativas</b> e <b>Técnicas/Médicas</b>. Também alimenta a sugestão de motivos no cadastro de glosas acima.</div>
-      <div class="formgrid">
-        <div class="field"><label>Tipo</label><select id="gmCategoria">
-          ${GLOSA_CATEGORIAS.map(c=>`<option value="${c.key}" ${editMot && editMot.categoria===c.key?'selected':''}>${esc(c.label)}</option>`).join('')}
-        </select></div>
-        <div class="field" style="grid-column:span 3;"><label>Motivo</label><input id="gmTexto" placeholder="Ex: Número de carteirinha do beneficiário inválido ou vencido." value="${editMot?esc(editMot.texto):''}"></div>
-      </div>
-      <div style="margin-top:14px;display:flex;gap:8px;">
-        ${editMot
-          ? `<button class="btn" onclick="saveMotivoGlosa()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditMotivoGlosa()">Cancelar</button>`
-          : `<button class="btn" onclick="saveMotivoGlosa()">+ Adicionar motivo</button>`}
-      </div>
-      <div class="table-wrap" style="margin-top:14px;"><table>
-        <thead><tr><th style="width:22%;">Tipo</th><th>Motivo</th><th></th></tr></thead>
-        <tbody>
-          ${STATE.glosaMotivos.length===0 ? `<tr class="empty-row"><td colspan="3">Nenhum motivo cadastrado.</td></tr>` :
-            STATE.glosaMotivos.map(m=>`
-            <tr>
-              <td>${esc(glosaCategoriaLabel(m.categoria))}</td>
-              <td>${esc(m.texto)}</td>
-              <td><button class="btn ghost small" onclick="editMotivoGlosa('${m.id}')">✏️ editar</button>
-                  <button class="btn ghost small" onclick="deleteMotivoGlosa('${m.id}')">🗑 excluir</button></td>
-            </tr>`).join('')}
-        </tbody>
-      </table></div>
-    </div>
-
-    <div class="card edit-only">
-      <h2>Justificativas da glosa</h2>
-      <div class="subtitle">Texto corrido que aparece no relatório logo depois dos motivos.</div>
-      <div class="formgrid">
-        <div class="field wide"><label>Justificativa</label><textarea id="gjTexto" placeholder="Ex: As guias glosadas foram reapresentadas com o pedido médico original digitalizado em anexo.">${editJus?esc(editJus.texto):''}</textarea></div>
-      </div>
-      <div style="margin-top:14px;display:flex;gap:8px;">
-        ${editJus
-          ? `<button class="btn" onclick="saveJustifGlosa()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditJustifGlosa()">Cancelar</button>`
-          : `<button class="btn" onclick="saveJustifGlosa()">+ Adicionar justificativa</button>`}
-      </div>
-      <div class="table-wrap" style="margin-top:14px;"><table>
-        <thead><tr><th>Justificativa</th><th></th></tr></thead>
-        <tbody>
-          ${STATE.glosaJustificativas.length===0 ? `<tr class="empty-row"><td colspan="2">Nenhuma justificativa cadastrada.</td></tr>` :
-            STATE.glosaJustificativas.map(j=>`
-            <tr>
-              <td>${esc(j.texto)}</td>
-              <td><button class="btn ghost small" onclick="editJustifGlosa('${j.id}')">✏️ editar</button>
-                  <button class="btn ghost small" onclick="deleteJustifGlosa('${j.id}')">🗑 excluir</button></td>
-            </tr>`).join('')}
-        </tbody>
-      </table></div>
-    </div>
-
-    <div class="card edit-only">
-      <h2>5. Plano de ação para prevenção e redução de glosas</h2>
-      <div class="subtitle">Dividido em <b>ação de curto prazo</b>, <b>ação de médio prazo</b> e <b>ação de longo prazo</b>.</div>
-      <div class="formgrid">
-        <div class="field"><label>Prazo</label><select id="gaPrazo">
-          ${GLOSA_PRAZOS.map(p=>`<option value="${p.key}" ${editAca && editAca.prazo===p.key?'selected':''}>${esc(p.label)}</option>`).join('')}
-        </select></div>
-        <div class="field"><label>Responsável / setor</label><input id="gaResponsavel" placeholder="Ex: Recepção" value="${editAca?esc(editAca.responsavel||''):''}"></div>
-        <div class="field half"><label>Ação</label><input id="gaTexto" placeholder="Ex: Treinar a equipe de atendimento para validar a assinatura do paciente." value="${editAca?esc(editAca.texto):''}"></div>
-      </div>
-      <div style="margin-top:14px;display:flex;gap:8px;">
-        ${editAca
-          ? `<button class="btn" onclick="saveAcaoGlosa()">💾 Salvar alterações</button><button class="btn secondary" onclick="cancelEditAcaoGlosa()">Cancelar</button>`
-          : `<button class="btn" onclick="saveAcaoGlosa()">+ Adicionar ação</button>`}
-      </div>
-      <div class="table-wrap" style="margin-top:14px;"><table>
-        <thead><tr><th style="width:22%;">Prazo</th><th style="width:20%;">Responsável / setor</th><th>Ação</th><th></th></tr></thead>
-        <tbody>
-          ${STATE.glosaPlanoAcao.length===0 ? `<tr class="empty-row"><td colspan="4">Nenhuma ação cadastrada.</td></tr>` :
-            STATE.glosaPlanoAcao.map(a=>`
-            <tr>
-              <td>${esc(glosaPrazoLabel(a.prazo))}</td>
-              <td>${esc(a.responsavel||'')||'—'}</td>
-              <td>${esc(a.texto)}</td>
-              <td><button class="btn ghost small" onclick="editAcaoGlosa('${a.id}')">✏️ editar</button>
-                  <button class="btn ghost small" onclick="deleteAcaoGlosa('${a.id}')">🗑 excluir</button></td>
             </tr>`).join('')}
         </tbody>
       </table></div>
