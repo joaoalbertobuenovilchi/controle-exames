@@ -299,6 +299,23 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 .report-header .rh-item span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:700;margin-bottom:2px;}
 .report-header .rh-item b{font-size:12.5px;color:var(--ink);}
 
+/* Linha do brasão/logo no topo do cabeçalho dos relatórios (posição escolhida no
+   Cadastro da Entidade). Só aparece quando ao menos uma das duas imagens foi
+   importada; caso contrário o cabeçalho fica exatamente como sempre foi. */
+.rh-brandrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
+.rh-brandrow .rh-brand-slot{display:flex;align-items:center;gap:8px;min-height:1px;}
+.rh-brandrow .rh-brand-slot:empty{display:none;}
+.rh-brandrow .rh-brand-slot-right{margin-left:auto;}
+.rh-img{max-height:52px;max-width:120px;width:auto;height:auto;object-fit:contain;display:block;}
+.rh-img-fallback{font-size:26px;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;filter:grayscale(0);}
+@media print{ .rh-img{max-height:46px;} .rh-img-fallback{font-size:22px;width:34px;height:34px;} }
+
+/* Importação de imagens (brasão/logo) no Cadastro da Entidade */
+.img-upload-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;}
+.img-upload-preview{max-height:64px;max-width:140px;width:auto;height:auto;object-fit:contain;border:1px solid var(--line);border-radius:8px;padding:6px;background:#fff;}
+.img-upload-empty{font-size:11.5px;color:var(--ink-soft);border:1px dashed var(--line);border-radius:8px;padding:10px 14px;background:#fff;}
+.img-upload-actions{display:flex;gap:8px;flex-wrap:wrap;}
+
 /* Botão de impressão nos cabeçalhos de relatório */
 .btn.print-btn{display:inline-flex;align-items:center;gap:6px;}
 
@@ -935,7 +952,8 @@ let STATE = {
   tiposConvenio: DEFAULT_TIPOS_CONVENIO.map(t=>({...t})),
   competencia: { mes: MESES[new Date().getMonth()], ano: new Date().getFullYear() },
   /* --- Módulos novos (não afetam nada do que já existia) --- */
-  entidade: { nome:'', cnpj:'', nomeFantasia:'', endereco:'', numero:'', cep:'', telefone:'' },
+  entidade: { nome:'', cnpj:'', nomeFantasia:'', endereco:'', numero:'', cep:'', telefone:'',
+              brasao:'', brasaoPos:'esquerda', logo:'', logoPos:'direita' },
   glosas: [],                 // glosas lançadas por exame/laboratório/convênio
   glosaMotivos: [],           // motivos de glosa (visão geral): ADMINISTRATIVA / TECNICA
   glosaJustificativas: [],    // justificativas das glosas
@@ -999,9 +1017,14 @@ function garantirTiposConvenio(){
    É chamada ao carregar os dados da nuvem e ao importar um backup antigo. */
 function garantirModulosNovos(){
   if(!STATE.entidade || typeof STATE.entidade !== 'object') STATE.entidade = {};
-  ['nome','cnpj','nomeFantasia','endereco','numero','cep','telefone'].forEach(k=>{
+  ['nome','cnpj','nomeFantasia','endereco','numero','cep','telefone','brasao','logo'].forEach(k=>{
     if(STATE.entidade[k]===undefined) STATE.entidade[k] = '';
   });
+  /* Posição do brasão/logo nos cabeçalhos dos relatórios: fica a critério do
+     administrador (canto esquerdo ou direito). Enquanto não escolher, usa o
+     padrão sugerido (brasão à esquerda, logo à direita). */
+  if(STATE.entidade.brasaoPos!=='esquerda' && STATE.entidade.brasaoPos!=='direita') STATE.entidade.brasaoPos = 'esquerda';
+  if(STATE.entidade.logoPos!=='esquerda' && STATE.entidade.logoPos!=='direita') STATE.entidade.logoPos = 'direita';
   if(!Array.isArray(STATE.glosas)) STATE.glosas = [];
   if(!Array.isArray(STATE.glosaJustificativas)) STATE.glosaJustificativas = [];
   if(!Array.isArray(STATE.glosaPlanoAcao)) STATE.glosaPlanoAcao = [];
@@ -1214,11 +1237,35 @@ function vigenciaFor(laboratorio, convenioCadastro){
     .filter(Boolean))];
   return periodos.length ? periodos.join(' / ') : '—';
 }
+/* Linha do brasão (ex.: da prefeitura/município) e do logo (ex.: laboratório/
+   clínica/operadora) exibida no topo dos cabeçalhos de relatórios/impressões.
+   A posição de cada imagem (canto esquerdo ou direito) é definida pelo
+   administrador no módulo "Cadastro da Entidade". Enquanto uma imagem não for
+   importada para um determinado canto, esse canto mantém o ícone padrão do
+   aplicativo (🧪, o mesmo do menu principal) — ou seja, todo relatório e
+   impressão sempre traz algo nos dois cantos superiores. */
+function reportBrandRowHTML(){
+  const e = STATE.entidade || {};
+  const brasaoPos = e.brasaoPos==='direita' ? 'direita' : 'esquerda';
+  const logoPos = e.logoPos==='esquerda' ? 'esquerda' : 'direita';
+  const slots = { esquerda: [], direita: [] };
+  const addImg = (src, pos, alt) => {
+    if(!src) return;
+    slots[pos].push(`<img class="rh-img" src="${esc(src)}" alt="${esc(alt)}">`);
+  };
+  addImg(e.brasao, brasaoPos, 'Brasão da entidade');
+  addImg(e.logo, logoPos, 'Logo do laboratório/clínica/operadora');
+  const iconePadrao = `<span class="rh-img rh-img-fallback" title="Ícone padrão do aplicativo">🧪</span>`;
+  if(!slots.esquerda.length) slots.esquerda.push(iconePadrao);
+  if(!slots.direita.length) slots.direita.push(iconePadrao);
+  return `<div class="rh-brandrow"><div class="rh-brand-slot">${slots.esquerda.join('')}</div><div class="rh-brand-slot rh-brand-slot-right">${slots.direita.join('')}</div></div>`;
+}
 /* Monta o bloco de cabeçalho padrão (HTML): Prefeitura, Convênio, Laboratório, Vigência e Competência */
 function reportHeaderHTML({convenio, laboratorio, vigencia, competenciaText, mes, ano, rotuloLaboratorio}){
   const compTxt = competenciaText || competenciaLabel(mes, ano);
   return `
     <div class="report-header">
+      ${reportBrandRowHTML()}
       <div class="rh-prefeitura">🏛️ ${esc(entidadeNome())}</div>
       <div class="rh-grid">
         <div class="rh-item"><span>Convênio</span><b>${esc(convenio || '—')}</b></div>
@@ -2389,6 +2436,92 @@ function escopoTituloModulo(){ return relEscopo==='IMAGEM' ? 'Exames de Imagem' 
    entidade" passa a encabeçar os relatórios impressos. Enquanto estes campos
    estiverem em branco, tudo continua exatamente como sempre foi.
    ============================================================ */
+/* Monta o campo de importação de uma imagem (brasão ou logo): pré-visualização,
+   botões de importar/trocar/remover e o seletor de posição no cabeçalho dos
+   relatórios (canto esquerdo ou direito — a critério do administrador). */
+function imagemEntidadeCampoHTML(chave, rotulo, e){
+  const src = e[chave] || '';
+  const posKey = chave + 'Pos';
+  const pos = e[posKey] || (chave==='logo' ? 'direita' : 'esquerda');
+  const inputId = 'ent' + chave.charAt(0).toUpperCase() + chave.slice(1) + 'File';
+  return `
+    <div class="field half">
+      <label>${esc(rotulo)}</label>
+      <div class="img-upload-row">
+        ${src ? `<img class="img-upload-preview" src="${esc(src)}" alt="${esc(rotulo)}">` : `<div class="img-upload-empty">Nenhuma imagem importada</div>`}
+        <div class="img-upload-actions">
+          <button type="button" class="btn secondary small" onclick="document.getElementById('${inputId}').click()">${src ? '🔄 Trocar imagem' : '⭱ Importar imagem'}</button>
+          ${src ? `<button type="button" class="btn secondary small" onclick="removerImagemEntidade('${chave}')">🗑 Remover</button>` : ''}
+        </div>
+        <input type="file" id="${inputId}" accept="image/*" style="display:none;" onchange="onImagemEntidadeFile(event,'${chave}')">
+      </div>
+      <label>Posição no cabeçalho dos relatórios</label>
+      <select onchange="setPosicaoImagemEntidade('${posKey}', this.value)">
+        <option value="esquerda" ${pos==='esquerda'?'selected':''}>Canto superior esquerdo</option>
+        <option value="direita" ${pos==='direita'?'selected':''}>Canto superior direito</option>
+      </select>
+    </div>
+  `;
+}
+/* Redimensiona a imagem no navegador (canvas) antes de gravar, para manter o
+   cadastro leve na nuvem. Preserva transparência (PNG); só recorre a JPEG se
+   o PNG ficar grande demais. */
+function processarImagemEntidade(file, maxLado){
+  maxLado = maxLado || 320;
+  return new Promise((resolve, reject)=>{
+    if(!file.type || !file.type.startsWith('image/')){ reject(new Error('Selecione um arquivo de imagem (PNG, JPG etc.).')); return; }
+    const reader = new FileReader();
+    reader.onerror = ()=> reject(new Error('Não foi possível ler o arquivo.'));
+    reader.onload = (evt)=>{
+      const img = new Image();
+      img.onerror = ()=> reject(new Error('Não foi possível ler esta imagem.'));
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w>=h && w>maxLado){ h = Math.round(h*maxLado/w); w = maxLado; }
+        else if(h>w && h>maxLado){ w = Math.round(w*maxLado/h); h = maxLado; }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0,0,w,h);
+        ctx.drawImage(img,0,0,w,h);
+        let dataUrl = canvas.toDataURL('image/png');
+        if(dataUrl.length > 450000) dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        if(dataUrl.length > 700000){ reject(new Error('Imagem muito grande mesmo após a compactação. Tente uma versão mais simples ou menor.')); return; }
+        resolve(dataUrl);
+      };
+      img.src = evt.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+async function onImagemEntidadeFile(ev, chave){
+  if(semPermissao('entidade')){ ev.target.value=''; return; }
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if(!file) return;
+  try{
+    const dataUrl = await processarImagemEntidade(file);
+    STATE.entidade = STATE.entidade || {};
+    STATE.entidade[chave] = dataUrl;
+    saveState(); render();
+    showToast((chave==='brasao' ? 'Brasão' : 'Logo') + ' importado com sucesso.', 'success');
+  }catch(err){
+    showToast(err.message || 'Não foi possível importar esta imagem.', 'error');
+  }
+}
+function removerImagemEntidade(chave){
+  if(semPermissao('entidade')) return;
+  STATE.entidade = STATE.entidade || {};
+  STATE.entidade[chave] = '';
+  saveState(); render();
+  showToast((chave==='brasao' ? 'Brasão removido.' : 'Logo removido.'));
+}
+function setPosicaoImagemEntidade(posKey, valor){
+  if(semPermissao('entidade')) return;
+  STATE.entidade = STATE.entidade || {};
+  STATE.entidade[posKey] = (valor==='direita') ? 'direita' : 'esquerda';
+  saveState(); render();
+}
 function viewEntidade(){
   const e = STATE.entidade || {};
   const linha = (rot, val) => `<tr><td style="width:34%;"><b>${esc(rot)}</b></td><td>${esc(val)||'—'}</td></tr>`;
@@ -2411,12 +2544,21 @@ function viewEntidade(){
         <button class="btn secondary" onclick="limparEntidade()">🗑 Limpar cadastro</button>
       </div>
     </div>
+    <div class="card edit-only">
+      <h2>🖼️ Brasão e logo</h2>
+      <div class="subtitle">Opcional. Se importados, aparecem automaticamente no cabeçalho de todos os relatórios e impressões do sistema, na posição escolhida abaixo. Cada alteração aqui é salva imediatamente.</div>
+      <div class="formgrid">
+        ${imagemEntidadeCampoHTML('brasao', 'Brasão (ex: da prefeitura/município)', e)}
+        ${imagemEntidadeCampoHTML('logo', 'Logo (ex: laboratório/clínica/operadora)', e)}
+      </div>
+    </div>
     <div class="card">
       <div class="flexrow" style="margin-bottom:8px;">
         <h2 style="margin:0;">Entidade cadastrada</h2>
         <button class="btn secondary small print-btn" onclick="printReport('entPrint')">🖨️ Imprimir</button>
       </div>
       <div id="entPrint">
+        ${reportBrandRowHTML()}
         <table>
           <tbody>
             ${linha('Nome da entidade', e.nome)}
@@ -2434,7 +2576,9 @@ function viewEntidade(){
 function saveEntidade(){
   if(semPermissao('entidade')) return;
   const val = id => (document.getElementById(id)?.value || '').trim();
+  const atual = STATE.entidade || {};
   STATE.entidade = {
+    ...atual, // preserva brasão/logo e suas posições, já salvos ao importar
     nome: val('entNome'),
     cnpj: val('entCnpj'),
     nomeFantasia: val('entFantasia'),
@@ -2447,8 +2591,9 @@ function saveEntidade(){
 }
 function limparEntidade(){
   if(semPermissao('entidade')) return;
-  if(!confirm('Limpar todos os dados da entidade? Nenhum outro cadastro do sistema é afetado.')) return;
-  STATE.entidade = { nome:'', cnpj:'', nomeFantasia:'', endereco:'', numero:'', cep:'', telefone:'' };
+  if(!confirm('Limpar todos os dados da entidade, incluindo brasão e logo importados? Nenhum outro cadastro do sistema é afetado.')) return;
+  STATE.entidade = { nome:'', cnpj:'', nomeFantasia:'', endereco:'', numero:'', cep:'', telefone:'',
+                      brasao:'', brasaoPos:'esquerda', logo:'', logoPos:'direita' };
   saveState(); render(); showToast('Cadastro da entidade limpo.');
 }
 
@@ -3351,6 +3496,7 @@ function glosaReportHTML(dados, domId){
       <div class="glosa-report-title">RELATÓRIO DE GLOSAS DE EXAMES LABORATORIAIS</div>
       ${d.numero ? `<div class="glosa-report-num">Nº ${esc(d.numero)}</div>` : ''}
       <div class="report-header">
+        ${reportBrandRowHTML()}
         <div class="rh-prefeitura">🏛️ ${esc(d.entidade || entidadeNome())}</div>
         <div class="rh-grid">
           <div class="rh-item"><span>Identificação do Laboratório</span><b>${esc(d.identificacao)}</b></div>
