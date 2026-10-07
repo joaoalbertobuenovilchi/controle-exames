@@ -905,10 +905,16 @@ function trocarCodigoAcesso(){
                                 para Cadastros → "Configurar Glosas" (renumerados 1, 2 e 3
                                 na ordem de preenchimento da tela), e menu principal
                                 com grupos recolhíveis e busca de módulos
+     4.27.2026  07/10/2026      importação de arquivos (Conferência e Lançamentos) passa a
+                                localizar sozinha a linha de títulos das colunas e a
+                                desconsiderar títulos, cabeçalhos repetidos nas quebras de
+                                página, rodapés, totais e assinaturas — só as linhas de
+                                exames são importadas; lê todas as abas/tabelas do arquivo
+                                e passa a aceitar PDF (gerado pelo sistema do laboratório)
    ============================================================ */
 const APP_CRIACAO = { mes: 7, ano: 2026 };   // julho/2026 = mês 1
-const APP_ALTERACAO = 26;                     // nº acumulado de alterações publicadas
-const APP_DATA = '2026-09-04';                // data desta versão (AAAA-MM-DD)
+const APP_ALTERACAO = 27;                     // nº acumulado de alterações publicadas
+const APP_DATA = '2026-10-07';                // data desta versão (AAAA-MM-DD)
 function appVersao(){
   const p = APP_DATA.split('-').map(Number);
   const ano = p[0], mes = p[1];
@@ -4130,15 +4136,15 @@ function viewLancamento(){
       <div class="flexrow">
         <div>
           <h2 style="margin:0;">Importar exames — ${convenioLabel(lancTab)}</h2>
-          <div class="subtitle" style="margin-bottom:0;">Importe uma lista de exames realizados a partir de uma planilha/arquivo (.xlsx, .csv, .docx ou .txt).</div>
+          <div class="subtitle" style="margin-bottom:0;">Importe uma lista de exames realizados a partir de uma planilha/arquivo (.xlsx, .csv, .docx, .txt ou .pdf).</div>
         </div>
         <div>
-          <input type="file" id="importFile" accept=".xlsx,.xls,.csv,.docx,.txt" style="display:none" onchange="handleImportFile(event)">
+          <input type="file" id="importFile" accept=".xlsx,.xls,.csv,.docx,.txt,.pdf" style="display:none" onchange="handleImportFile(event)">
           <button class="btn" onclick="document.getElementById('importFile').click()">📥 Importar arquivo</button>
         </div>
       </div>
       <div class="helpbox" style="margin-top:12px;">
-        O arquivo deve ter colunas como <b>Paciente, Data, Exame, Laboratório, Unidade, Resultado, Quantidade</b> (os nomes podem variar um pouco). Cada exame informado precisa já existir no <b>Cadastro de Exames</b> com o mesmo nome (ou apelido cadastrado), laboratório e convênio desta aba (${convenioLabel(lancTab)}) — do contrário a linha será ignorada e listada no aviso ao final da importação.
+        O arquivo pode ser importado do jeito que o laboratório emite: o sistema localiza sozinho a linha com os títulos das colunas (<b>Paciente, Data, Exame</b> ou <b>Descrição do Exame</b>, <b>Quantidade</b> e, se houver, <b>Laboratório, Unidade, Resultado</b> — os nomes podem variar um pouco) e aproveita <b>somente as linhas de exames</b>. Títulos do relatório, cabeçalhos repetidos nas quebras de página, números de página, rodapés, totais, subtotais e assinaturas são desconsiderados automaticamente. O <b>PDF</b> precisa ser o gerado pelo sistema do laboratório (com texto que dá para selecionar); PDF escaneado ou foto não pode ser lido. Cada exame informado precisa já existir no <b>Cadastro de Exames</b> com o mesmo nome (ou apelido cadastrado — vale também a sigla/código que o laboratório usa, ex.: "COIN"), laboratório e convênio desta aba (${convenioLabel(lancTab)}) — do contrário a linha será ignorada e listada no aviso ao final da importação.
       </div>
       ${ultimoLoteVisivelHtml()}
     </div>
@@ -4361,124 +4367,875 @@ function canonicalizeExameNome(nome){
   return ex ? ex.descricao : nome;
 }
 
-/* ---------------- Importação de arquivos (xlsx / csv / docx / txt) ---------------- */
+/* ---------------- Importação de arquivos (xlsx / csv / docx / txt) ----------------
+   Os arquivos dos laboratórios quase nunca são uma tabela "limpa": trazem o título do
+   relatório, entidade, convênio e período, o cabeçalho das colunas repetido a cada página,
+   rodapé com número da página e data de emissão, linhas de total/subtotal, assinatura etc.
+   Por isso a leitura NÃO supõe que a 1ª linha do arquivo é o cabeçalho:
+   1) o arquivo inteiro vira uma sequência de linhas × células (todas as planilhas do Excel,
+      todas as tabelas e parágrafos do Word, todas as linhas do .csv/.txt);
+   2) a linha com os títulos das colunas é localizada pelo conteúdo (Paciente, Exame, Data,
+      Qtd...) — tudo o que vem antes dela (título do relatório) é descartado;
+   3) quando o cabeçalho reaparece (quebra de página) ele é reconhecido e pulado;
+   4) só viram registro as linhas que têm exame preenchido e não são total, subtotal, rodapé,
+      número de página, assinatura nem título. O paciente informado só na 1ª linha do grupo
+      (célula mesclada) ou numa linha "Paciente: FULANO" vale para os exames logo abaixo.
+   O resultado é uma lista de registros {paciente, exame, exameAlt, data, laboratorio,
+   unidade, resultado, quantidade}. Esta parte só LÊ o arquivo — não grava nada no sistema. */
 function normHeader(h){
-  return String(h||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+  return String(h||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'');
 }
-function extractField(rowObj, keywords){
-  for(const k in rowObj){
-    const nk = normHeader(k);
-    if(keywords.some(kw=>nk.includes(kw))) return rowObj[k];
+/* Texto limpo de uma célula. Datas do Excel viram DD/MM/AAAA (com a hora, quando houver). */
+function impTextoCelula(v){
+  if(v===null || v===undefined) return '';
+  if(v instanceof Date){
+    if(isNaN(v.getTime())) return '';
+    const d = new Date(Math.round(v.getTime()/60000)*60000);
+    const p = n=>String(n).padStart(2,'0');
+    const dia = `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()}`;
+    return (d.getHours()||d.getMinutes()) ? `${dia} ${p(d.getHours())}:${p(d.getMinutes())}` : dia;
+  }
+  return String(v).replace(/[   ]/g,' ').replace(/\s+/g,' ').trim();
+}
+/* Data, número ou valor em dinheiro: conteúdo de linha de dados — nunca título de coluna,
+   nome de paciente ou nome de exame. */
+function impPareceValor(t){
+  const s = String(t||'').trim();
+  if(!s) return false;
+  if(/^\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}(\s+\d{1,2}:\d{2}(:\d{2})?)?$/.test(s)) return true;
+  if(/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?$/.test(s)) return true;
+  return /^(R\$\s*)?[-+]?\d[\d.\s]*(,\d+)?%?$/i.test(s);
+}
+/* Número no padrão brasileiro ("1.234,50", "2,00", "3"). */
+function impNumero(v){
+  if(typeof v==='number') return v;
+  let s = String(v||'').replace(/R\$/i,'').replace(/\s/g,'');
+  if(!s) return NaN;
+  if(/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g,'').replace(',','.');
+  else s = s.replace(',','.');
+  return Number(s);
+}
+/* Diz a que informação do sistema corresponde um título de coluna do arquivo.
+   Devolve {campo, pontos} (mais pontos = mais certeza); {campo:'outro'} para colunas
+   conhecidas que o sistema não usa (Sexo, Valor, Convênio, Status...); ou null. */
+function impCampoDoTitulo(texto){
+  const t = String(texto||'').trim();
+  if(!t || t.length>45) return null;
+  if(/:\s*\S/.test(t)) return null;   // "Convênio: PREFEITURA" é informação do relatório, não título de coluna
+  if(impPareceValor(t)) return null;
+  const n = normHeader(t);
+  if(!n) return null;
+  const tem = (...k)=>k.some(x=>n.includes(x));
+  const eh  = (...k)=>k.includes(n);
+  const ini = (...k)=>k.some(x=>n.startsWith(x));
+
+  // Quantidade — antes de Exame ("Qtd. Exames" é quantidade)
+  if(eh('qtd','qtde','qt','quant','quantidade','qtdexames','qtdexame','qtddeexames','quantidadedeexames','quantidadeexames',
+        'nexames','numerodeexames','qtdrealizada','quantidaderealizada')) return {campo:'quantidade', pontos:100};
+  if(tem('qtd','qtde','quant')){
+    if(tem('cp','cr','cota','paciente','saldo','contrat')) return {campo:'outro'};
+    return {campo:'quantidade', pontos:60};
+  }
+  // Data do exame/atendimento — antes de Exame ("Data do Exame" é data)
+  if(eh('data','dt','dia','datahora','dataehora','datahr') || ini('data','dt')){
+    if(tem('nasc','emiss','impress','valid','venc')) return {campo:'outro'};
+    if(eh('data','dt','dia','datahora','dataehora','datahr')) return {campo:'data', pontos:100};
+    if(tem('exame','atend','colet','realiz','entrada','solicit','pedido','requisi','servic','proced','recep','movim','lanc','agend')) return {campo:'data', pontos:90};
+    return {campo:'data', pontos:50};
+  }
+  if(tem('laborat')) return {campo:'laboratorio', pontos:100};
+  if(tem('prestador','executante')) return {campo:'laboratorio', pontos:60};
+  if(tem('unidade') && !tem('medida')) return {campo:'unidade', pontos:100};
+  if(tem('estabelecimento') || eh('ubs','local','localdecoleta','localcoleta','posto','origem','setorsolicitante')) return {campo:'unidade', pontos:50};
+  if(tem('resultado') && !tem('status','situacao')) return {campo:'resultado', pontos:100};
+  // Colunas conhecidas que o sistema não usa: reconhecê-las ajuda a achar a linha de cabeçalho
+  if(tem('nasc','sexo','genero','cpf','cns','cartao','prontuario','registro','telefone','fone','celular','endereco','bairro',
+         'cidade','municipio','nomedamae','nomemae','responsavel','medico','solicitante','profission','crm','status','situacao',
+         'valor','preco','total','urgencia','atendente','operador','digitador','observ','convenio','guia','senha','protocolo',
+         'leito','idpaciente','codpaciente','codigopaciente','codigodopaciente','ordem','sequencia','requisicao','pedido',
+         'idade','material','metodo','tipo','grupo','setor','competencia','especialidade','plano','matricula')
+     || eh('n','no','num','numero','seq','item','id','ano','mes','codigo','cod','cd')) return {campo:'outro'};
+  // Paciente
+  if(tem('paciente','beneficiario','cidadao')) return {campo:'paciente', pontos:100};
+  if(eh('nome','nomecompleto','nomesocial')) return {campo:'paciente', pontos:80};
+  if(tem('usuario')) return {campo:'paciente', pontos:30};   // "Nome do Usuário": no SUS às vezes é o paciente, às vezes o atendente
+  if(ini('nome') && !tem('exame','proced','laborat','fantasia','empresa','razao','mae','pai')) return {campo:'paciente', pontos:60};
+  // Código/sigla do exame (ex.: "COIN", "HTLV") — usado como segunda forma de reconhecer o exame
+  if(tem('exame','proced','sigtap') && tem('cod','sigla','mnem','abrev')) return {campo:'exameAlt', pontos:100};
+  if(eh('sigla','mnemonico','abreviatura','abrev','sigtap','codigosigtap','codsigtap','codigotuss','tuss')) return {campo:'exameAlt', pontos:90};
+  // Nome/descrição do exame
+  if(tem('exame','proced') && tem('descri','nome')) return {campo:'exame', pontos:100};
+  if(eh('exame','exames','procedimento','procedimentos','examesolicitado','examerealizado','examesrealizados','examessolicitados',
+        'analise','analises','teste','testes','servico','servicos')) return {campo:'exame', pontos:85};
+  if(eh('descricao','descricaodoitem','descricaodoservico','descricaoservico')) return {campo:'exame', pontos:70};
+  if(tem('exame','proced')) return {campo:'exame', pontos:60};
+  if(tem('descri')) return {campo:'exame', pontos:40};
+  return null;
+}
+/* Verifica se a linha é a de títulos das colunas e, se for, devolve o mapa campo → nº da coluna.
+   modo 'estrito': precisa de ao menos dois dados principais (ex.: Paciente + Exame, Exame + Qtd);
+   modo 'simples': aceita só a coluna do exame (lista simples, usada só se o estrito não achar nada). */
+function impLerCabecalho(cel, modo){
+  const achados = {};
+  let cheias = 0, conhecidas = 0;
+  for(let i=0;i<cel.length;i++){
+    const t = cel[i];
+    if(!t) continue;
+    cheias++;
+    if(impPareceValor(t)) return null;            // linha com data/número é linha de dados
+    const r = impCampoDoTitulo(t);
+    if(!r) continue;
+    conhecidas++;
+    if(r.campo==='outro') continue;
+    (achados[r.campo] = achados[r.campo] || []).push({idx:i, pontos:r.pontos});
+  }
+  if(!cheias || conhecidas/cheias < 0.5) return null;
+  const temExame = !!achados.exame || !!achados.exameAlt;
+  const principais = ['paciente','data','quantidade'].filter(k=>achados[k]).length + (temExame?1:0);
+  if(modo==='estrito'){
+    if(principais<2 || !(temExame || achados.paciente)) return null;
+  } else if(!(achados.exame||[]).some(a=>a.pontos>=70) || cheias>8) return null;
+  const ordem = lista => lista.slice().sort((a,b)=>b.pontos-a.pontos);
+  const melhor = k => achados[k] ? ordem(achados[k])[0].idx : undefined;
+  const mapa = { paciente:melhor('paciente'), exame:melhor('exame'), data:melhor('data'), quantidade:melhor('quantidade'),
+                 laboratorio:melhor('laboratorio'), unidade:melhor('unidade'), resultado:melhor('resultado') };
+  // Demais colunas de exame (sigla/código ou um 2º nome): alternativas para reconhecer o exame
+  mapa.alternativas = ordem((achados.exame||[]).concat(achados.exameAlt||[])).map(a=>a.idx).filter(i=>i!==mapa.exame);
+  if(mapa.exame===undefined && mapa.alternativas.length) mapa.exame = mapa.alternativas.shift();
+  mapa.colunas = ['paciente','exame','data','quantidade','laboratorio','unidade'].filter(k=>mapa[k]!==undefined).length + mapa.alternativas.length;
+  return mapa;
+}
+/* Linhas que nunca são exame: totais, rodapés, páginas, emissão, assinatura... */
+const IMP_RE_RODAPE = /^(sub-?\s?tot(al|ais)\b|tot(al|ais)\b|tot\.|soma\b|qtd\.?\s*(de\s+|total\s+)?(pacientes|exames|registros|atendimentos|itens)|quantidade\s+(de|total)\b|n[º°o.]*\s*de\s+(pacientes|exames|registros)|p[aá]g(ina)?\.?\s*\d|folha\s*\d|emitido|emiss[aã]o\b|impresso\s+(em|por)|impress[aã]o\b|gerado\s+(em|por)|data\s+(de\s+|da\s+)?(emiss[aã]o|impress[aã]o)|relat[oó]rio\b|assinatura|respons[aá]vel|carimbo|continua\b|continua[cç][aã]o|a\s+transportar|transporte\b|vem\s+de\b|vai\s+para\b|observa[cç][aãoõ]|obs\s*[:.]|usu[aá]rio\s*:|www\.|https?:|[_\-=.*\s]{4,}$|\d+\s*(de|\/)\s*\d+$|per[ií]odo\b|compet[eê]ncia\b|vig[eê]ncia\b|prefeitura\b|munic[ií]pio\s+de\b|cnpj\b|(conv[eê]nio|unidade|local|laborat[oó]rio|prestador)\s*:)/i;
+const IMP_RE_TOTAL = /^(sub-?\s?tot(al|ais)\b|tot(al|ais)\b|tot\.)/i;
+/* Linhas de grupo: "Paciente: FULANO" / "Exame: HEMOGRAMA" valem para as linhas de baixo */
+const IMP_RE_CTX_PACIENTE = /^(?:nome\s+do\s+paciente|nome\s+paciente|paciente|benefici[aá]rio|nome)\s*(?::|\s[-–]\s)\s*(.*)$/i;
+const IMP_RE_CTX_EXAME = /^(?:nome\s+do\s+exame|descri[cç][aã]o\s+do\s+exame|exame|procedimento)\s*(?::|\s[-–]\s)\s*(.*)$/i;
+/* Só o rótulo com dois-pontos é retirado do valor da célula ("Paciente: MARIA" → "MARIA");
+   "EXAME - URINA TIPO I" é nome de exame e fica como está. */
+const IMP_RE_ROT_PACIENTE = /^(?:nome\s+do\s+paciente|nome\s+paciente|paciente|nome)\s*:\s*(.*)$/i;
+const IMP_RE_ROT_EXAME = /^(?:nome\s+do\s+exame|descri[cç][aã]o\s+do\s+exame|exame|procedimento)\s*:\s*(.*)$/i;
+/* Célula que é só um título de coluna (cabeçalho repetido quebrado em duas linhas, por ex.) */
+const IMP_TITULOS_PUROS = new Set(['paciente','pacientes','nome','nomedopaciente','nomepaciente','exame','exames','descricao',
+  'descricaoexame','descricaodoexame','nomedoexame','procedimento','procedimentos']);
+const IMP_RE_CORTE = /\s+(?:data|dt|nasc\w*|idade|sexo|cpf|cns|cart[aã]o|prontu[aá]rio|c[oó]d(?:igo)?|conv[eê]nio|registro|telefone|fone|m[eê]dico|solicitante|unidade|atendimento|pedido|requisi[cç][aã]o)\.?\s*[:\-]/i;
+function impValorRotulado(cel, re){
+  for(let i=0;i<cel.length;i++){
+    const m = re.exec(cel[i]||'');
+    if(!m) continue;
+    let v = (m[1]||'').trim() || (cel.slice(i+1).find(x=>x) || '');
+    v = v.split(IMP_RE_CORTE)[0].trim();
+    if(!v || /^(todos|todas|-|—)$/i.test(v) || impPareceValor(v)) return '';
+    return v;
   }
   return '';
 }
-function textToRows(text){
-  const lines = String(text).split(/\r?\n/).filter(l=>l.trim()!=='');
-  if(lines.length===0) return [];
-  const delim = lines[0].includes('\t') ? '\t' : (lines[0].includes(';') ? ';' : ',');
-  const headers = lines[0].split(delim).map(h=>h.trim());
-  return lines.slice(1).map(line=>{
-    const cells = line.split(delim);
-    const obj={}; headers.forEach((h,i)=>obj[h]=(cells[i]||'').trim()); return obj;
-  });
+/* Tira o rótulo que às vezes vem junto do valor ("Paciente: MARIA" → "MARIA") */
+function impSemRotulo(v, re){
+  const m = re.exec(v||'');
+  return m ? (m[1]||'').trim() : (v||'');
 }
-function parseCSVFile(file){
-  return new Promise((resolve,reject)=>{
-    Papa.parse(file, { header:true, skipEmptyLines:true, complete:(res)=>resolve(res.data), error:reject });
-  });
+function impExtrairRegistros(blocos){
+  const res = impExtrairRegistrosModo(blocos, 'estrito');
+  return res.cabecalhos ? res : impExtrairRegistrosModo(blocos, 'simples');
 }
-function parseXLSXFile(file){
+function impExtrairRegistrosModo(blocos, modo){
+  const registros = [];
+  let mapa = null, cabecalhos = 0, descartadas = 0, principalComPaciente = false;
+  let ctxPaciente = '', ctxExame = '', ultPaciente = '', ultData = '';
+  let continua = false;   // a linha anterior foi exame ou cabeçalho (não título/rodapé/total)
+  let grupo = null;       // paciente da linha de grupo, no relatório agrupado por paciente (ver abaixo)
+  blocos.forEach(bloco=>{
+    (bloco.linhas||[]).forEach(bruta=>{
+      // Nova página do PDF: o título no alto dela não é continuação do último paciente
+      if(bruta && bruta.quebraDePagina){ continua = false; return; }
+      if(bruta && bruta.descartada){ descartadas++; continua = false; return; }
+      const cel = (bruta||[]).map(impTextoCelula);
+      if(!cel.some(c=>c)) return;                           // linha em branco
+      const cab = impLerCabecalho(cel, modo);
+      if(cab){
+        cabecalhos++;
+        // Cabeçalho sem Paciente e sem Data depois de um que tinha Paciente = quadro-resumo no
+        // fim do relatório (ex.: "Exame | Qtd | Valor"): as linhas dele não são exames realizados.
+        if(cab.paciente!==undefined) principalComPaciente = true;
+        cab.resumo = principalComPaciente && cab.paciente===undefined && cab.data===undefined;
+        mapa = cab;
+        continua = true;
+        return;
+      }
+      const rotPac = impValorRotulado(cel, IMP_RE_CTX_PACIENTE);
+      const rotEx = impValorRotulado(cel, IMP_RE_CTX_EXAME);
+      if(rotPac) ctxPaciente = rotPac;
+      if(rotEx) ctxExame = rotEx;
+      const primeira = cel.find(c=>c) || '';
+      if(!mapa || mapa.resumo){ descartadas++; continua = false; return; }    // título antes do cabeçalho / quadro-resumo
+
+      const val = i => (i===undefined ? '' : (cel[i]||''));
+
+      // Relatório agrupado por paciente, sem coluna de exame (ex.: LABORVITA "Paciente por
+      // Convênio": "Data | Código | Paciente | Valores"). A linha com data é a do paciente; as
+      // linhas de baixo, sem data, trazem o nome do EXAME na mesma coluna do paciente e o valor.
+      // O bloco de dados do paciente (Sexo, Data Nasc., Usuário) e "Qtd. Exames"/"Total" que
+      // fecham o grupo são descartados.
+      if(mapa.exame===undefined && !mapa.alternativas.length && mapa.paciente!==undefined && mapa.data!==undefined && !ctxExame){
+        const txt = impSemRotulo(val(mapa.paciente), IMP_RE_ROT_PACIENTE);
+        const dt = val(mapa.data);
+        const fecha = IMP_RE_TOTAL.test(primeira) || /^qtd/i.test(primeira);
+        if(!txt || impPareceValor(txt) || IMP_RE_RODAPE.test(primeira) || IMP_RE_ROTULO.test(primeira)
+           || IMP_RE_RODAPE.test(txt) || IMP_RE_ROTULO.test(txt) || IMP_TITULOS_PUROS.has(normHeader(txt))){
+          descartadas++; continua = false;
+          if(fecha) grupo = null;                     // "Qtd. Exames" / "Total" encerram o paciente
+          return;
+        }
+        if(/\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}/.test(dt)){   // linha do paciente
+          grupo = { paciente:txt, data:dt };
+          descartadas++; continua = true;
+          return;
+        }
+        const temValor = cel.some((x,i)=>i!==mapa.paciente && x && impPareceValor(x));
+        if(grupo && (temValor || continua)){            // linha do exame
+          const qg = impNumero(val(mapa.quantidade));
+          registros.push({
+            paciente: grupo.paciente, exame: txt, exameAlt: [], data: grupo.data,
+            laboratorio: val(mapa.laboratorio), unidade: val(mapa.unidade), resultado: val(mapa.resultado),
+            quantidade: (isFinite(qg) && qg>0) ? qg : 1, origem: bloco.origem,
+          });
+          continua = true;
+          return;
+        }
+        descartadas++; continua = false;
+        return;
+      }
+      let pac = impSemRotulo(val(mapa.paciente), IMP_RE_ROT_PACIENTE);
+      let ex = impSemRotulo(val(mapa.exame), IMP_RE_ROT_EXAME);
+      if(impPareceValor(pac)) pac = '';
+      if(impPareceValor(ex) && !/^\d{6,}$/.test(ex.replace(/[.\-\s]/g,''))) ex = '';   // valor/data/total não é exame (código SIGTAP longo é)
+      const alts = mapa.alternativas.map(val).filter(v=>v && v!==ex && !/^R\$/i.test(v) && !/^\d{1,4}([.,]\d+)?$/.test(v));
+      const exameDaLinha = !!(ex || alts.length);
+      const exTexto = ex || alts[0] || (mapa.exame===undefined ? ctxExame : '');
+      const pacDaLinha = !!pac;
+      if(!pac) pac = mapa.paciente===undefined ? ctxPaciente : (ultPaciente || ctxPaciente);
+      const proprias = ['paciente','exame','data','quantidade','laboratorio','unidade'].map(k=>mapa[k])
+        .concat(mapa.alternativas).filter(i=>i!==undefined && cel[i]).length;
+      // Título solto de página costuma ocupar uma célula só; por isso a linha precisa de pelo
+      // menos 2 colunas preenchidas — exceto a continuação do grupo do paciente (célula
+      // mesclada), que vem logo depois de outro exame ou do cabeçalho.
+      const celulasOk = proprias >= Math.min(2, mapa.colunas) || (exameDaLinha && !pacDaLinha && !!pac && continua);
+
+      const valida = exTexto
+        && (exameDaLinha || pacDaLinha)                      // exame vindo do grupo exige paciente na própria linha
+        && celulasOk
+        && !IMP_RE_RODAPE.test(exTexto) && !IMP_RE_RODAPE.test(pac)
+        && !/:$/.test(exTexto) && !/:$/.test(pac)
+        && !IMP_TITULOS_PUROS.has(normHeader(exTexto)) && !IMP_TITULOS_PUROS.has(normHeader(pac))
+        && !IMP_RE_CTX_PACIENTE.test(exTexto) && !IMP_RE_CTX_EXAME.test(pac);   // linha de grupo "Paciente: X" não é exame
+      if(!valida){
+        descartadas++;
+        continua = false;
+        if(IMP_RE_TOTAL.test(primeira)){ ultPaciente = ''; ultData = ''; }   // fim do grupo do paciente
+        return;
+      }
+      continua = true;
+      const dataLinha = val(mapa.data);
+      const data = dataLinha || (!pacDaLinha ? ultData : '');
+      if(pacDaLinha) ultPaciente = pac;
+      if(dataLinha) ultData = dataLinha;
+      const q = impNumero(val(mapa.quantidade));
+      registros.push({
+        paciente: pac,
+        exame: ex || (alts.length ? '' : exTexto),
+        exameAlt: alts,
+        data,
+        laboratorio: val(mapa.laboratorio),
+        unidade: val(mapa.unidade),
+        resultado: val(mapa.resultado),
+        quantidade: (isFinite(q) && q>0) ? q : 1,
+        origem: bloco.origem,
+      });
+    });
+  });
+  return { registros, cabecalhos, descartadas, modo };
+}
+
+/* ---- Leitura de cada formato: tudo vira blocos de linhas × células ---- */
+function impLerComoArrayBuffer(file){
   return new Promise((resolve,reject)=>{
     const reader = new FileReader();
-    reader.onload = (evt)=>{
-      try{
-        const wb = XLSX.read(evt.target.result, {type:'array'});
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        resolve(XLSX.utils.sheet_to_json(sheet, {defval:''}));
-      }catch(err){ reject(err); }
-    };
-    reader.onerror = reject;
+    reader.onload = evt=>resolve(evt.target.result);
+    reader.onerror = ()=>reject(reader.error || new Error('falha na leitura do arquivo'));
     reader.readAsArrayBuffer(file);
   });
 }
-function parseDOCXFile(file){
-  return new Promise((resolve,reject)=>{
-    const reader = new FileReader();
-    reader.onload = (evt)=>{
-      mammoth.convertToHtml({arrayBuffer:evt.target.result}).then(result=>{
-        const doc = new DOMParser().parseFromString(result.value,'text/html');
-        const table = doc.querySelector('table');
-        if(!table){ resolve(textToRows(doc.body.textContent)); return; }
-        const trs = Array.from(table.querySelectorAll('tr'));
-        if(trs.length<2){ resolve([]); return; }
-        const headers = Array.from(trs[0].querySelectorAll('td,th')).map(td=>td.textContent.trim());
-        const rows = trs.slice(1).map(tr=>{
-          const cells = Array.from(tr.querySelectorAll('td,th')).map(td=>td.textContent.trim());
-          const obj={}; headers.forEach((h,i)=>obj[h]=cells[i]||''); return obj;
-        });
-        resolve(rows);
-      }).catch(reject);
-    };
-    reader.onerror = reject;
-    reader.readAsArrayBuffer(file);
+/* .csv/.txt: tenta UTF-8; se o arquivo foi gravado no padrão do Windows (ANSI), lê como
+   Windows-1252 para não estragar os acentos dos nomes. */
+function impDecodificarTexto(buf){
+  let txt;
+  try{ txt = new TextDecoder('utf-8', {fatal:true}).decode(buf); }
+  catch(e){ txt = new TextDecoder('windows-1252').decode(buf); }
+  return txt.replace(/^﻿/,'');
+}
+function impTextoEmLinhas(txt){
+  const linhas = String(txt).replace(/\f/g,'\n').split(/\r\n|\n|\r/);
+  // O separador é descoberto na linha de títulos (a 1ª que cita exame junto com paciente/data/qtd),
+  // e não na 1ª linha do arquivo, que costuma ser o título do relatório.
+  const linhaTit = linhas.find(l=>/EXAME|PROCEDIMENTO|DESCRI/.test(normTxt(l)) && /PACIENTE|NOME|DATA|QTD|QUANT/.test(normTxt(l)))
+                || linhas.find(l=>/EXAME|PROCEDIMENTO/.test(normTxt(l))) || '';
+  const conta = (texto, d) => texto.split(d).length-1;
+  let delim = null;
+  if(linhaTit){
+    delim = ['\t',';','|',','].map(d=>({d, c:conta(linhaTit,d)})).sort((a,b)=>b.c-a.c)[0];
+  } else {
+    // sem linha de títulos reconhecível: vírgula só se não houver outro separador (vírgula decimal engana)
+    const tudo = linhas.join('\n');
+    delim = ['\t',';','|'].map(d=>({d, c:conta(tudo,d)})).sort((a,b)=>b.c-a.c)[0];
+    if(!delim.c) delim = {d:',', c:conta(tudo,',')};
+  }
+  if(delim.c>0) return Papa.parse(linhas.join('\n'), {delimiter:delim.d, skipEmptyLines:false}).data;
+  return impColunasAlinhadas(linhas, linhaTit);
+}
+/* Relatório "de impressão" em texto, com colunas alinhadas por espaços: cada pedaço da linha
+   (separado por 2+ espaços) vai para a coluna do cabeçalho sobre a qual ele está. */
+function impColunasAlinhadas(linhas, linhaTit){
+  const pedacos = l => { const r = []; const re = /\S+(?: \S+)*/g; let m; while((m = re.exec(l))) r.push({t:m[0], i:m.index, f:m.index+m[0].length}); return r; };
+  const cols = pedacos(linhaTit);
+  if(cols.length<2) return linhas.map(l=>pedacos(l).map(p=>p.t));
+  return linhas.map(l=>{
+    const cel = new Array(cols.length).fill('');
+    pedacos(l).forEach(p=>{
+      let melhor = 0, melhorV = -Infinity;
+      cols.forEach((c,k)=>{
+        const fim = k+1<cols.length ? cols[k+1].i : Infinity;
+        const sob = Math.min(p.f, fim) - Math.max(p.i, c.i);
+        const v = sob>0 ? sob : -Math.min(Math.abs(p.i-c.i), Math.abs(p.f-c.f));
+        if(v>melhorV){ melhorV = v; melhor = k; }
+      });
+      cel[melhor] = cel[melhor] ? cel[melhor]+' '+p.t : p.t;
+    });
+    return cel;
   });
 }
-function parseTXTFile(file){
-  return new Promise((resolve,reject)=>{
-    const reader = new FileReader();
-    reader.onload = (evt)=>resolve(textToRows(evt.target.result));
-    reader.onerror = reject;
-    reader.readAsText(file, 'utf-8');
+async function impBlocosTexto(file){
+  return [{ origem:file.name, linhas: impTextoEmLinhas(impDecodificarTexto(await impLerComoArrayBuffer(file))) }];
+}
+async function impBlocosXLSX(file){
+  const wb = XLSX.read(await impLerComoArrayBuffer(file), {type:'array', cellDates:true});
+  const infoAbas = (wb.Workbook && wb.Workbook.Sheets) || [];
+  return wb.SheetNames.map((nome,i)=>{
+    const sh = wb.Sheets[nome];
+    if(!sh || !sh['!ref'] || (infoAbas[i] && infoAbas[i].Hidden)) return {origem:nome, linhas:[]};   // aba oculta não entra
+    const rg = XLSX.utils.decode_range(sh['!ref']);
+    rg.s.r = 0; rg.s.c = 0;   // sempre a partir de A1, para as colunas de todas as abas baterem
+    return {origem:nome, linhas: XLSX.utils.sheet_to_json(sh, {header:1, defval:'', raw:true, range:rg, blankrows:false})};
   });
+}
+/* Tabela do Word → linhas × células, respeitando células mescladas (colspan/rowspan) para
+   que cada valor continue embaixo do título certo. */
+function impLinhasDaTabela(tab){
+  const linhas = [], pendentes = [];
+  Array.from(tab.rows).forEach(tr=>{
+    const linha = []; let col = 0;
+    Array.from(tr.cells).forEach(td=>{
+      while(pendentes[col]>0){ linha[col] = ''; pendentes[col]--; col++; }
+      const txt = Array.from(td.childNodes).map(n=>n.textContent).join(' ').replace(/\s+/g,' ').trim();
+      const cs = Math.max(1, td.colSpan||1), rs = Math.max(1, td.rowSpan||1);
+      for(let k=0;k<cs;k++){ linha[col] = k===0 ? txt : ''; if(rs>1) pendentes[col] = rs-1; col++; }
+    });
+    for(; col<pendentes.length; col++){ linha[col] = ''; if(pendentes[col]>0) pendentes[col]--; }
+    linhas.push(linha);
+  });
+  return linhas;
+}
+async function impBlocosDOCX(file){
+  const buf = await impLerComoArrayBuffer(file);
+  const html = (await mammoth.convertToHtml({arrayBuffer:buf})).value;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  if(!doc.querySelector('table')){
+    const txt = (await mammoth.extractRawText({arrayBuffer:buf})).value;
+    return [{ origem:file.name, linhas: impTextoEmLinhas(txt) }];
+  }
+  // Percorre o documento na ordem: parágrafos soltos (títulos, "Paciente: ...") e TODAS as
+  // tabelas — no Word convertido de PDF, cada página costuma virar uma tabela separada.
+  const linhas = [];
+  const visitar = el=>{
+    if(el.tagName==='TABLE'){ linhas.push(...impLinhasDaTabela(el)); return; }
+    if(el.querySelector('table')){ Array.from(el.children).forEach(visitar); return; }
+    const t = el.textContent.replace(/\s+/g,' ').trim();
+    if(t) linhas.push([t]);
+  };
+  Array.from(doc.body.children).forEach(visitar);
+  return [{ origem:file.name, linhas }];
+}
+
+/* ---- PDF ----
+   O PDF não tem células: só pedaços de texto com a posição de cada um na página. A leitura:
+   1) junta os pedaços que estão na mesma altura (uma linha impressa do relatório);
+   2) acha, em cada página, a linha com os títulos das colunas;
+   3) descobre onde começa e termina cada coluna pelas faixas verticais em branco entre os
+      dados (funciona com colunas alinhadas à esquerda, à direita ou centralizadas);
+   4) põe cada pedaço de texto embaixo do título certo e junta de volta o nome de exame ou
+      de paciente que quebrou em duas ou mais linhas dentro da mesma célula.
+   Daí em diante as linhas seguem pelo mesmo leitor dos outros formatos, que descarta
+   títulos, cabeçalhos repetidos, rodapés e totais. PDF digitalizado (foto/scanner) não tem
+   texto e não pode ser lido. O leitor de PDF (pdf.js) só é baixado na primeira vez que um
+   PDF é importado, para não deixar a abertura do sistema mais lenta. */
+const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+let impPdfJsCarregando = null;
+function impCarregarPdfJs(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if(!impPdfJsCarregando){
+    impPdfJsCarregando = new Promise((resolve, reject)=>{
+      const s = document.createElement('script');
+      s.src = PDFJS_URL;
+      s.onload = ()=>{
+        if(!window.pdfjsLib){ impPdfJsCarregando = null; reject(new Error('leitor de PDF indisponível')); return; }
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+        resolve(window.pdfjsLib);
+      };
+      s.onerror = ()=>{ impPdfJsCarregando = null; s.remove(); reject(new Error('não foi possível carregar o leitor de PDF — verifique a conexão com a internet')); };
+      document.head.appendChild(s);
+    });
+  }
+  return impPdfJsCarregando;
+}
+/* Marca a passagem de uma página do PDF para a seguinte (ver impExtrairRegistrosModo). */
+const IMP_QUEBRA_PAGINA = Object.freeze(Object.assign([], {quebraDePagina:true}));
+/* Pedaço de texto do PDF que não pertence a nenhuma linha da tabela (ver impPdfJuntarQuebras). */
+const IMP_LINHA_DESCARTADA = Object.freeze(Object.assign([], {descartada:true}));
+/* Um pedaço de texto do PDF às vezes traz várias colunas separadas por espaços (relatório de
+   impressão): separa nos trechos com 2 ou mais espaços, estimando a posição de cada trecho. */
+function impPdfPedacos(str, x, w, y, h){
+  const res = [], n = str.length || 1, re = /\S+(?: \S+)*/g;
+  let m;
+  while((m = re.exec(str))) res.push({ t:m[0], x0:x + w*m.index/n, x1:x + w*(m.index+m[0].length)/n, y, h });
+  return res;
+}
+/* Pedaços na mesma altura = mesma linha impressa. */
+function impPdfLinhas(itens){
+  const linhas = [];
+  itens.slice().sort((a,b)=>a.y-b.y || a.x0-b.x0).forEach(it=>{
+    const l = linhas[linhas.length-1];
+    if(l && Math.abs(it.y-l.y) <= Math.max(2, 0.45*Math.min(it.h, l.h))) l.itens.push(it);
+    else linhas.push({ y:it.y, h:it.h, itens:[it] });
+  });
+  linhas.forEach(l=>{ l.itens.sort((a,b)=>a.x0-b.x0); l.h = Math.max(...l.itens.map(i=>i.h)); });
+  return linhas;
+}
+/* Palavras próximas viram um bloco de texto; um espaço maior que o normal entre palavras separa
+   blocos (ex.: um título de coluna do outro). */
+function impPdfBlocos(itens, h){
+  const blocos = [];
+  itens.forEach(it=>{
+    const b = blocos[blocos.length-1];
+    const gap = b ? it.x0 - b.x1 : Infinity;
+    if(b && gap < 0.45*h){ b.t += (gap > 0.12*h ? ' ' : '') + it.t; b.x1 = Math.max(b.x1, it.x1); }
+    else blocos.push({ t:it.t, x0:it.x0, x1:it.x1 });
+  });
+  return blocos;
+}
+function impPdfJuntarTexto(itens, h){
+  let t = '', fim = -Infinity;
+  itens.slice().sort((a,b)=>a.x0-b.x0).forEach(it=>{
+    if(t && it.x0 - fim > 0.12*h) t += ' ';
+    t += it.t; fim = Math.max(fim, it.x1);
+  });
+  return t;
+}
+/* Linha "completa" da tabela: tem data/número ou pelo menos 3 colunas preenchidas. */
+function impPdfLinhaCheia(c){
+  return c.filter(x=>x).length>=3 || c.some(x=>x && impPareceValor(x));
+}
+/* Rótulo de relatório ("Convênio: X", "Paciente:", "Total do Convênio: R$") — hora como
+   "09:39" não conta, porque o dois-pontos vem depois de número. */
+const IMP_RE_ROTULO = /[A-Za-zÀ-ÿ.)]\s*:/;
+/* Linha de título/rodapé/total: algum rótulo com dois-pontos, ou a linha COMEÇA com
+   "Total", "Página", "Emitido"... Só o começo da linha conta: "TOTAL DE" pode ser o pedaço
+   de baixo de "CAPACIDADE TOTAL DE LIGAÇÃO DO FERRO". */
+function impPdfLinhaRotulo(cel){
+  const primeira = cel.find(x=>x) || '';
+  return IMP_RE_RODAPE.test(primeira) || cel.some(x=>x && IMP_RE_ROTULO.test(x));
+}
+/* Títulos de coluna escritos em mais de uma linha ("Descrição" em cima de "Exame") viram um
+   título só: os pedaços que estão um em cima do outro são juntados. */
+function impPdfRotulos(grupo){
+  const rot = [];
+  grupo.forEach(l=>impPdfBlocos(l.itens, l.h).forEach(b=>{
+    const r = rot.find(x=>Math.min(x.x1,b.x1) - Math.max(x.x0,b.x0) > 0);
+    if(r){ r.t += ' '+b.t; r.x0 = Math.min(r.x0,b.x0); r.x1 = Math.max(r.x1,b.x1); }
+    else rot.push({ t:b.t, x0:b.x0, x1:b.x1 });
+  }));
+  return rot.sort((a,b)=>a.x0-b.x0);
+}
+/* Acha o cabeçalho da página: uma linha, ou até 4 linhas bem juntas (título de coluna em
+   duas ou três linhas). Entre as opções que formam um cabeçalho, fica a que reconhece mais
+   títulos — assim "Nome do" / "Usuário" não é confundido com o nome do paciente. */
+function impPdfAcharCabecalho(linhas){
+  const temValor = l => impPdfBlocos(l.itens, l.h).some(b=>impPareceValor(b.t) || IMP_RE_RODAPE.test(b.t));
+  for(const modo of ['estrito','simples']){
+    for(let i=0; i<linhas.length; i++){
+      let melhor = null;
+      for(let n=1; n<=4 && i+n<=linhas.length; n++){
+        if(n>1){
+          const a = linhas[i+n-2], b = linhas[i+n-1];
+          if(b.y - a.y > 0.85*Math.max(a.h, b.h) || temValor(b)) break;
+        }
+        const rot = impPdfRotulos(linhas.slice(i, i+n));
+        if(!impLerCabecalho(rot.map(r=>r.t), modo)) continue;
+        const conhecidos = rot.filter(r=>impCampoDoTitulo(r.t)).length;
+        if(!melhor || conhecidos>melhor.conhecidos) melhor = { i, fim:i+n-1, rot, conhecidos };
+      }
+      if(melhor) return melhor;
+    }
+  }
+  return null;
+}
+/* Colunas da tabela: faixas da página ocupadas pelos dados, separadas por faixas verticais em
+   branco. Cada faixa fica com o título de coluna que está em cima dela (ou o mais próximo). */
+function impPdfColunas(linhas, fimCab, rotulos){
+  const h = linhas[fimCab].h;
+  const dados = linhas.slice(fimCab+1).map(l=>impPdfBlocos(l.itens, l.h))
+    .filter(bs=>bs.length>=2 && !impPdfLinhaRotulo(bs.map(b=>b.t)));
+  const fonte = dados.length ? dados : [rotulos];
+  const todos = rotulos.concat(...fonte);
+  const ini = Math.floor(Math.min(...todos.map(b=>b.x0)));
+  const cob = new Array(Math.ceil(Math.max(...todos.map(b=>b.x1))) - ini + 2).fill(0);
+  fonte.forEach(bs=>bs.forEach(b=>{ for(let x=Math.floor(b.x0); x<Math.ceil(b.x1); x++) cob[x-ini]++; }));
+  const limite = fonte.length<10 ? 0 : Math.floor(fonte.length*0.05);   // algumas linhas "invadindo" não fecham o espaço
+  const faixas = [];
+  for(let x=0; x<cob.length; x++){
+    if(cob[x]<=limite) continue;
+    const f = faixas[faixas.length-1];
+    if(f && x+ini - f.x1 < 0.4*h) f.x1 = x+ini+1;
+    else faixas.push({ x0:x+ini, x1:x+ini+1 });
+  }
+  const sobre = (a,b)=>Math.min(a.x1,b.x1) - Math.max(a.x0,b.x0);
+  const dist = (a,b)=>Math.max(0, a.x0-b.x1, b.x0-a.x1);
+  const colunas = [];
+  faixas.forEach(f=>{
+    const cima = rotulos.map((r,k)=>({ k, s:sobre(f,r) })).filter(o=>o.s>0);
+    if(cima.length<=1){
+      // faixa sem título em cima (ex.: a hora ao lado da data): fica com o título mais próximo
+      // à esquerda dela; se não houver nenhum à esquerda, com o mais próximo
+      const esq = rotulos.map((r,j)=>({ r, j })).filter(o=>o.r.x1 <= f.x0);
+      const lista = esq.length ? esq : rotulos.map((r,j)=>({ r, j }));
+      const k = cima.length ? cima[0].k : lista.reduce((a,o)=>dist(f,o.r) < dist(f,a.r) ? o : a).j;
+      colunas.push({ x0:f.x0, x1:f.x1, k });
+    } else {
+      // a faixa ficou embaixo de mais de um título: divide no meio do espaço entre eles
+      let x0 = f.x0;
+      cima.forEach((o,j)=>{
+        const x1 = j<cima.length-1 ? (rotulos[o.k].x1 + rotulos[cima[j+1].k].x0)/2 : f.x1;
+        colunas.push({ x0, x1, k:o.k });
+        x0 = x1;
+      });
+    }
+  });
+  return { rotulos: rotulos.map(r=>r.t), colunas };
+}
+/* Põe cada pedaço de texto da linha embaixo do título de coluna certo. */
+function impPdfCelulas(linha, col){
+  const grupos = col.rotulos.map(()=>[]);
+  linha.itens.forEach(it=>{
+    let melhor = null, mv = -Infinity;
+    col.colunas.forEach(c=>{
+      const s = Math.min(it.x1,c.x1) - Math.max(it.x0,c.x0);
+      const v = s>0 ? s : -Math.max(0, it.x0-c.x1, c.x0-it.x1);
+      if(v>mv){ mv = v; melhor = c; }
+    });
+    if(melhor) grupos[melhor.k].push(it);
+  });
+  return grupos.map(g=>impPdfJuntarTexto(g, linha.h));
+}
+/* Linha da tabela escrita em várias linhas de texto (nome do paciente ou do exame que não
+   coube na largura da célula). Em cada linha da tabela há uma linha de texto "âncora": a que
+   tem os códigos, datas e valores. Os pedaços das outras linhas voltam para a âncora certa:
+   - o espaçamento entre as linhas de uma mesma célula é sempre o mesmo (o da fonte);
+   - pela posição dos pedaços em relação às âncoras, descobre se o texto das células está
+     alinhado em cima (pedaços abaixo da âncora), embaixo (acima) ou centralizado;
+   - em cima/embaixo: o pedaço vai para a âncora logo acima/abaixo dele;
+   - centralizado: cada célula (linhas seguidas da coluna, no espaçamento da fonte) vai para
+     a âncora que está no meio dela. */
+function impPdfJuntarQuebras(regs){
+  const nValores = c => c.filter(x=>x && impPareceValor(x)).length;
+  const maxV = Math.max(0, ...regs.map(r=>nValores(r.cel)));
+  if(!maxV) return regs;                          // tabela sem nenhum número: não há como saber
+  const minV = Math.ceil(maxV/2);
+  let bloco = 0;
+  regs.forEach(r=>{
+    r.ancora = nValores(r.cel) >= minV;
+    r.solto = !r.ancora && r.cel.some(x=>x) && !impLerCabecalho(r.cel,'estrito') && !impPdfLinhaRotulo(r.cel);
+    if(!r.ancora && !r.solto) bloco++;            // título, rodapé ou cabeçalho repetido separa os blocos
+    r.bloco = bloco; r.extra = []; r.usado = r.cel.map(()=>false);
+  });
+  const ancoras = regs.filter(r=>r.ancora);
+  if(!ancoras.length || !regs.some(r=>r.solto)) return regs;
+  const n = regs[0].cel.length;
+  const hs = regs.map(r=>r.h).sort((a,b)=>a-b), h = hs[Math.floor(hs.length/2)];
+  // linhas de cada coluna, em sequência dentro de cada bloco
+  const seqs = [];
+  for(let k=0; k<n; k++){
+    let s = [];
+    regs.forEach(r=>{
+      if(!r.ancora && !r.solto){ if(s.length) seqs.push({k, itens:s}); s = []; return; }
+      if(r.cel[k]) s.push(r);
+    });
+    if(s.length) seqs.push({k, itens:s});
+  }
+  // espaçamento da fonte: a distância mais comum entre linhas vizinhas da mesma coluna em que
+  // uma delas é pedaço solto (havendo empate, a menor)
+  const difs = [];
+  seqs.forEach(({itens})=>itens.forEach((r,i)=>{
+    if(i && (r.solto || itens[i-1].solto)){ const d = r.y - itens[i-1].y; if(d >= 0.6*h) difs.push(d); }
+  }));
+  if(!difs.length) return regs;
+  const freq = new Map();
+  difs.forEach(d=>{ const b = Math.round(d*2)/2; freq.set(b, (freq.get(b)||0)+1); });
+  const maxF = Math.max(...freq.values());
+  const pBase = Math.min(...[...freq].filter(([,f])=>f >= 0.5*maxF).map(([b])=>b));
+  const iguais = difs.filter(d=>Math.abs(d-pBase) <= 0.6).sort((a,b)=>a-b);
+  const p = iguais[Math.floor(iguais.length/2)];
+  // dentro da célula o espaçamento é exato; de uma célula para a outra ele só "parece" igual
+  const tol = Math.max(0.25, 0.025*p);
+  const perto = (a,b) => Math.abs(a-b) <= tol;
+  // alinhamento do texto nas células
+  let acima = 0, abaixo = 0, meio = 0;
+  seqs.forEach(({k, itens})=>itens.forEach(r=>{
+    if(!r.solto) return;
+    ancoras.forEach(a=>{
+      if(a.bloco!==r.bloco) return;
+      const d = r.y - a.y;
+      if(perto(Math.abs(d), p/2)) meio++;
+      else if(a.cel[k] && perto(d, p)) abaixo++;
+      else if(a.cel[k] && perto(d, -p)) acima++;
+    });
+  }));
+  const total = acima + abaixo + meio;
+  const modo = !total ? 'perto'
+    : (meio >= 0.25*total || Math.min(acima,abaixo) >= 0.25*Math.max(acima,abaixo)) ? 'centro'
+    : (abaixo >= acima ? 'topo' : 'base');
+  const dar = (r, k, a)=>{ if(a){ a.extra.push({ k, y:r.y, t:r.cel[k] }); r.usado[k] = true; } };
+  const maisPerto = (r, lista, limite)=>{
+    let m = null;
+    lista.forEach(a=>{ if(!m || Math.abs(a.y-r.y) < Math.abs(m.y-r.y)) m = a; });
+    return m && Math.abs(m.y-r.y) <= limite ? m : null;
+  };
+  const limitePerto = Math.max(1.8*h, 1.5*p);
+  seqs.forEach(({k, itens})=>{
+    const cands = ancoras.filter(a=>a.bloco===itens[0].bloco);
+    if(modo!=='centro'){
+      itens.forEach(r=>{
+        if(!r.solto) return;
+        const lado = cands.filter(a=>modo==='topo' ? a.y < r.y : modo==='base' ? a.y > r.y : true);
+        dar(r, k, maisPerto(r, lado, modo==='perto' ? limitePerto : 6*p));
+      });
+      return;
+    }
+    // centralizado: monta as células da coluna (linhas seguidas no espaçamento da fonte)
+    const cadeias = [];
+    let c = [];
+    itens.forEach(r=>{
+      const ult = c[c.length-1];
+      if(ult && perto(r.y-ult.y, p) && !(r.ancora && c.some(x=>x.ancora))) c.push(r);
+      else { if(c.length) cadeias.push(c); c = [r]; }
+    });
+    if(c.length) cadeias.push(c);
+    const centro = cad => (cad[0].y + cad[cad.length-1].y)/2;
+    const naAltura = y => cands.find(a=>Math.abs(a.y-y) <= Math.max(tol, 0.2*p));
+    const semAncora = cad=>{
+      const a = naAltura(centro(cad));
+      if(a){ cad.forEach(x=>{ if(x.solto) dar(x, k, a); }); return; }
+      // duas células coladas (uma de cada linha da tabela): divide onde as duas ficam centradas
+      for(let s=1; s<cad.length; s++){
+        const a1 = naAltura(centro(cad.slice(0,s))), a2 = naAltura(centro(cad.slice(s)));
+        if(a1 && a2){
+          cad.slice(0,s).forEach(x=>{ if(x.solto) dar(x, k, a1); });
+          cad.slice(s).forEach(x=>{ if(x.solto) dar(x, k, a2); });
+          return;
+        }
+      }
+      cad.forEach(x=>{ if(x.solto) dar(x, k, maisPerto(x, cands, limitePerto)); });
+    };
+    cadeias.forEach(cad=>{
+      const i = cad.findIndex(x=>x.ancora);
+      if(i<0){ semAncora(cad); return; }
+      const r = Math.min(i, cad.length-1-i);      // a célula fica simétrica em volta da âncora
+      cad.slice(i-r, i+r+1).forEach(x=>{ if(x.solto) dar(x, k, cad[i]); });
+      if(i-r > 0) semAncora(cad.slice(0, i-r));
+      if(i+r+1 < cad.length) semAncora(cad.slice(i+r+1));
+    });
+  });
+  // pedaço solto que não coube em nenhuma linha da tabela não vira exame: vai como descartado
+  return regs
+    .filter(r=>!(r.solto && r.cel.every((x,k)=>!x || r.usado[k])))
+    .map(r=>{
+      if(r.solto) return { ...r, cel: IMP_LINHA_DESCARTADA };
+      const cel = r.cel.map((x,k)=>r.usado[k] ? '' : x);
+      if(!r.extra.length) return { ...r, cel };
+      return { ...r, cel: cel.map((x,k)=>{
+        const ex = r.extra.filter(e=>e.k===k);
+        if(!ex.length) return x;
+        const ord = lista => lista.sort((a,b)=>a.y-b.y).map(e=>e.t);
+        return ord(ex.filter(e=>e.y < r.y)).concat(x ? [x] : [], ord(ex.filter(e=>e.y > r.y))).join(' ');
+      }) };
+    });
+}
+/* Linhas × células de todas as páginas do PDF. */
+function impPdfMontarLinhas(paginas){
+  const saida = [];
+  let colAnt = null;
+  paginas.forEach((itens, p)=>{
+    if(p>0) saida.push(IMP_QUEBRA_PAGINA);
+    const linhas = impPdfLinhas(itens);
+    const texto = l => impPdfBlocos(l.itens, l.h).map(b=>b.t);
+    const cab = impPdfAcharCabecalho(linhas);
+    // Página sem o cabeçalho repetido usa as colunas da página anterior
+    const col = cab ? impPdfColunas(linhas, cab.fim, cab.rot) : colAnt;
+    if(!col){ linhas.forEach(l=>saida.push(texto(l))); return; }
+    colAnt = col;
+    // Título do alto da página (antes do cabeçalho ou da 1ª linha de dados) segue como uma
+    // célula só, com a linha inteira: o leitor descarta, mas ainda aproveita "Paciente: X".
+    let regs;
+    if(cab){
+      linhas.slice(0, cab.i).forEach(l=>saida.push([texto(l).join(' ')]));
+      saida.push(col.rotulos.slice());
+      regs = linhas.slice(cab.fim+1).map(l=>({ y:l.y, h:l.h, cel:impPdfCelulas(l, col) }));
+    } else {
+      regs = linhas.map(l=>({ y:l.y, h:l.h, cel:impPdfCelulas(l, col), texto:texto(l).join(' ') }));
+      let k = regs.findIndex(r=>impPdfLinhaCheia(r.cel));
+      if(k<0) k = regs.length;
+      regs.slice(0, k).forEach(r=>saida.push([r.texto]));
+      regs = regs.slice(k);
+    }
+    impPdfJuntarQuebras(regs).forEach(r=>saida.push(r.cel));
+  });
+  return saida;
+}
+async function impBlocosPDF(file){
+  const lib = await impCarregarPdfJs();
+  let pdf;
+  try{
+    pdf = await lib.getDocument({ data: new Uint8Array(await impLerComoArrayBuffer(file)) }).promise;
+  }catch(err){
+    if(err && err.name==='PasswordException') throw new Error('o PDF está protegido por senha. Peça ao laboratório o arquivo sem senha.');
+    throw err;
+  }
+  const paginas = [];
+  try{
+    for(let p=1; p<=pdf.numPages; p++){
+      const pagina = await pdf.getPage(p);
+      const vp = pagina.getViewport({ scale:1 });
+      const itens = [];
+      (await pagina.getTextContent()).items.forEach(it=>{
+        if(!it.str || !it.str.trim()) return;
+        const m = lib.Util.transform(vp.transform, it.transform);   // posição na página, de cima para baixo
+        if(Math.abs(m[1]) > 0.1*Math.abs(m[0])) return;             // texto inclinado/vertical (marca d'água)
+        const h = Math.hypot(m[2], m[3]) || it.height || 8;
+        itens.push(...impPdfPedacos(it.str, m[4], it.width || it.str.length*h*0.5, m[5], h));
+      });
+      paginas.push(itens);
+      pagina.cleanup();
+    }
+  } finally { pdf.destroy(); }
+  if(!paginas.some(p=>p.length)){
+    alert('Este PDF não tem texto que possa ser lido — parece ser uma imagem (documento escaneado ou foto).\n\nPeça ao laboratório o PDF gerado direto pelo sistema dele, ou o relatório em planilha (.xlsx/.csv).');
+    return null;
+  }
+  return [{ origem:file.name, linhas: impPdfMontarLinhas(paginas) }];
+}
+
+/* Lê o arquivo (qualquer formato aceito) e devolve só os registros de exames, já sem
+   títulos, cabeçalhos repetidos, rodapés e totais. Devolve null se o formato não é aceito. */
+async function impLerArquivo(file){
+  const ext = file.name.split('.').pop().toLowerCase();
+  let blocos;
+  if(ext==='xlsx' || ext==='xls') blocos = await impBlocosXLSX(file);
+  else if(ext==='csv' || ext==='txt') blocos = await impBlocosTexto(file);
+  else if(ext==='docx') blocos = await impBlocosDOCX(file);
+  else if(ext==='pdf') blocos = await impBlocosPDF(file);
+  else { showToast('Formato não suportado. Use .xlsx, .csv, .docx, .txt ou .pdf.'); return null; }
+  if(!blocos) return null;
+  const leitura = impExtrairRegistros(blocos);
+  // Excel com exames em mais de uma aba: pode ser o mesmo relatório dividido em páginas
+  // (juntar tudo) ou meses diferentes, um por aba (só a primeira) — o usuário decide.
+  const abas = [];
+  leitura.registros.forEach(r=>{
+    let a = abas.find(x=>x.nome===r.origem);
+    if(!a){ a = {nome:r.origem, qtd:0}; abas.push(a); }
+    a.qtd++;
+  });
+  if(blocos.length>1 && abas.length>1){
+    const lista = abas.map(a=>`• ${a.nome}: ${a.qtd} exame(s)`).join('\n');
+    if(!confirm(`Este arquivo tem exames em ${abas.length} abas (planilhas):\n\n${lista}\n\nOK = importar TODAS as abas (quando o relatório foi dividido em páginas/abas).\nCancelar = importar SOMENTE a primeira aba ("${abas[0].nome}").`)){
+      leitura.registros = leitura.registros.filter(r=>r.origem===abas[0].nome);
+    }
+  }
+  return leitura;
+}
+/* Mesmo nome de exame, sem diferenciar acento, maiúscula nem espaço — o PDF às vezes corta
+   uma palavra comprida no fim da linha da célula ("MICROALBUMI" / "NÚRIA"). */
+function impMesmoNomeExame(a, b){
+  const na = normTxt(a), nb = normTxt(b);
+  return !!na && (na===nb || na.replace(/ /g,'')===nb.replace(/ /g,''));
+}
+/* Frase com o que foi desconsiderado do arquivo (títulos, cabeçalhos, quebras de página, totais). */
+function impResumoDescartes(leitura){
+  const n = (leitura.descartadas||0) + (leitura.cabecalhos||0);
+  return n>0 ? `${n} linha(s) de título, cabeçalho, quebra de página, rodapé ou total foram desconsideradas.` : '';
+}
+function impAvisoNadaEncontrado(leitura){
+  if(!leitura || !leitura.cabecalhos){
+    alert('Não foi possível localizar no arquivo a linha com os títulos das colunas.\n\nO arquivo precisa ter, em alguma linha, os títulos das colunas — por exemplo: Paciente, Data, Exame (ou Descrição do Exame / Procedimento) e Quantidade. Títulos do relatório, cabeçalhos de página, rodapés e totais podem continuar no arquivo: eles são desconsiderados automaticamente.');
+  } else {
+    showToast('Nenhuma linha de exame encontrada no arquivo (só havia títulos, cabeçalhos, rodapés ou totais).');
+  }
 }
 async function handleImportFile(e){
   if(semPermissao('lancamento')){ e.target.value=''; return; }
   const file = e.target.files[0];
   if(!file) return;
-  const ext = file.name.split('.').pop().toLowerCase();
   try{
-    let rows = [];
-    if(ext==='csv') rows = await parseCSVFile(file);
-    else if(ext==='xlsx' || ext==='xls') rows = await parseXLSXFile(file);
-    else if(ext==='docx') rows = await parseDOCXFile(file);
-    else if(ext==='txt') rows = await parseTXTFile(file);
-    else { showToast('Formato não suportado. Use .xlsx, .csv, .docx ou .txt.'); return; }
-    importLancamentosFromRows(rows, file.name);
+    const leitura = await impLerArquivo(file);
+    if(leitura) importLancamentosFromRows(leitura, file.name);
   }catch(err){
     console.error(err);
     showToast('Erro ao ler o arquivo: '+err.message);
   }
   e.target.value = '';
 }
-function importLancamentosFromRows(rows, nomeArquivo){
-  if(!rows || rows.length===0){ showToast('Nenhuma linha reconhecida no arquivo.'); return; }
+function importLancamentosFromRows(leitura, nomeArquivo){
+  const rows = (leitura && leitura.registros) || [];
+  if(rows.length===0){ impAvisoNadaEncontrado(leitura); return; }
   const cadConv = cadastroValueFor(lancTab);
   const loteId = uid(); // identifica este lote de importação, para permitir excluir/desfazer de uma vez só
   let importados = 0;
   const ignorados = [];
+  const ativos = STATE.exames.filter(e => e.tipo==='ATIVO' && e.convenio===cadConv);
+  // Nome exatamente igual à descrição cadastrada OU a algum apelido/nome alternativo cadastrado
+  // (ex.: "PPF" cadastrado como apelido de "Parasitológico de Fezes"), respeitando o laboratório
+  // quando ele vier no arquivo.
+  const exato = (texto, labVal) => {
+    if(!normTxt(texto)) return null;
+    return ativos.find(e => exameNomesPossiveis(e).some(n => impMesmoNomeExame(n, texto)) &&
+      (!labVal || e.laboratorio.toLowerCase()===labVal.toLowerCase())) || null;
+  };
   rows.forEach(r=>{
-    const pacienteVal = String(extractField(r,['paciente','nome']) ?? '').trim();
-    const exameVal = String(extractField(r,['exame','descricao']) ?? '').trim();
-    const labVal = String(extractField(r,['laborat']) ?? '').trim();
-    const unidadeVal = String(extractField(r,['unidade']) ?? '').trim();
-    const resultadoVal = String(extractField(r,['resultado']) ?? 'NÃO').trim().toUpperCase();
-    const dataVal = String(extractField(r,['data']) ?? '').trim();
-    const qtdVal = Number(extractField(r,['quant','qtd'])) || 1;
+    const pacienteVal = r.paciente;
+    const labVal = r.laboratorio;
+    const resultadoVal = String(r.resultado||'NÃO').trim().toUpperCase();
+    const qtdVal = r.quantidade;
 
-    if(!exameVal){ ignorados.push('(linha sem nome de exame)'); return; }
-
-    // 1ª tentativa: nome exatamente igual à descrição cadastrada OU a algum apelido/nome
-    // alternativo cadastrado para o exame (ex.: "PPF" cadastrado como apelido de
-    // "Parasitológico de Fezes"), respeitando laboratório (quando informado no arquivo).
-    let exame = STATE.exames.find(e => e.tipo==='ATIVO' && e.convenio===cadConv &&
-      exameNomesPossiveis(e).some(n => normTxt(n)===normTxt(exameVal)) &&
-      (!labVal || e.laboratorio.toLowerCase()===labVal.toLowerCase()));
-    // 2ª tentativa: correspondência parcial (um contém o outro), também considerando apelidos.
+    // 1ª tentativa: nome do exame igual à descrição ou a um apelido cadastrado.
+    let exame = exato(r.exame, labVal);
+    // 2ª tentativa: código/sigla do laboratório (outra coluna do arquivo, ex.: "COIN"),
+    // quando estiver cadastrado como apelido do exame.
+    for(let i=0; !exame && i<r.exameAlt.length; i++) exame = exato(r.exameAlt[i], labVal);
+    // 3ª tentativa: correspondência parcial (um contém o outro), também considerando apelidos —
+    // só pelo nome do exame, nunca por sigla curta.
+    if(!exame && r.exame) exame = ativos.find(e => exameCasaComTexto(e, r.exame)) || null;
     if(!exame){
-      exame = STATE.exames.find(e => e.tipo==='ATIVO' && e.convenio===cadConv &&
-        exameCasaComTexto(e, exameVal));
+      ignorados.push(r.exame && r.exameAlt.length ? `${r.exame} (${r.exameAlt[0]})` : (r.exame || r.exameAlt[0]));
+      return;
     }
-    if(!exame){ ignorados.push(exameVal); return; }
 
     const usadaCP = usoCotaPrincipal(exame.id);
     const restoCP = Math.max(exame.cotaPrincipal - usadaCP, 0);
@@ -4489,8 +5246,8 @@ function importLancamentosFromRows(rows, nomeArquivo){
       id: uid(), convenio: lancTab, laboratorio: exame.laboratorio,
       exameId: exame.id, exameDescricao: exame.descricao,
       paciente: pacienteVal || '(não informado)',
-      data: dataVal || todayISO().replace('T',' '),
-      unidade: unidadeVal, resultado: resultadoVal==='SIM' ? 'SIM' : 'NÃO',
+      data: r.data || todayISO().replace('T',' '),
+      unidade: r.unidade, resultado: resultadoVal==='SIM' ? 'SIM' : 'NÃO',
       quantidade: qtdVal, qtdCP, qtdCR,
       valorUnit: exame.valorUnit, valorTotal: qtdVal*exame.valorUnit,
       competencia: STATE.competencia.mes, ano: STATE.competencia.ano,
@@ -4503,6 +5260,8 @@ function importLancamentosFromRows(rows, nomeArquivo){
   saveState(); render();
   let msg = `Importação concluída: ${importados} lançamento(s) importado(s).`;
   if(ignorados.length>0) msg += ` ${ignorados.length} linha(s) ignorada(s).`;
+  const descartes = impResumoDescartes(leitura);
+  if(descartes) msg += ` ${descartes}`;
   showToast(msg);
   if(importados>0){
     ultimoLoteImportado[lancTab] = {
@@ -5030,16 +5789,29 @@ function setComparativoTab(t){ comparativoTab = t; render(); }
 function normTxt(s){
   return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
 }
-/* Extrai paciente/exame/quantidade de cada linha do arquivo importado, reaproveitando
-   o mesmo motor de leitura de colunas (extractField) usado no Lançamento de Exames. */
-function extractComparativoRows(rows){
-  return rows.map(r=>({
+/* Paciente/exame/quantidade de cada registro lido do arquivo, usando o mesmo leitor do
+   Lançamento de Exames (impLerArquivo) — títulos, cabeçalhos repetidos, rodapés e totais
+   do arquivo já ficaram de fora. */
+function exameCanonicoDoRegistro(r){
+  // Nome do exame, ou a sigla/código do laboratório cadastrada como apelido, exatamente
+  // igual a um exame cadastrado → descrição oficial; senão, a busca aproximada pelo nome.
+  const exato = texto => {
+    if(!normTxt(texto)) return null;
+    const ex = STATE.exames.find(e => exameNomesPossiveis(e).some(n=>impMesmoNomeExame(n, texto)));
+    return ex ? ex.descricao : null;
+  };
+  const candidatos = [r.exame].concat(r.exameAlt||[]);
+  for(const c of candidatos){ const d = exato(c); if(d) return d; }
+  return r.exame ? canonicalizeExameNome(r.exame) : ((r.exameAlt||[])[0] || '');
+}
+function extractComparativoRows(registros){
+  return (registros||[]).map(r=>({
     // O nome do exame é "canonicalizado" para a descrição oficial cadastrada (via apelidos),
     // assim os dois arquivos comparados usam o mesmo nome de referência mesmo que os
     // laboratórios chamem o exame de formas diferentes.
-    paciente: String(extractField(r,['paciente','nome']) ?? '').trim(),
-    exame: canonicalizeExameNome(String(extractField(r,['exame','descricao']) ?? '').trim()),
-    quantidade: Number(extractField(r,['quant','qtd'])) || 1,
+    paciente: r.paciente,
+    exame: exameCanonicoDoRegistro(r),
+    quantidade: r.quantidade,
   })).filter(r=>r.paciente || r.exame);
 }
 async function handleComparativoImport(event, lado){
@@ -5051,20 +5823,16 @@ async function handleComparativoImport(event, lado){
   const labEl = document.getElementById(labSelectId);
   const labName = labEl ? labEl.value : '';
   if(!labName){ showToast('Selecione o laboratório antes de importar o arquivo.'); event.target.value=''; return; }
-  const ext = file.name.split('.').pop().toLowerCase();
   try{
-    let rows = [];
-    if(ext==='csv') rows = await parseCSVFile(file);
-    else if(ext==='xlsx' || ext==='xls') rows = await parseXLSXFile(file);
-    else if(ext==='docx') rows = await parseDOCXFile(file);
-    else if(ext==='txt') rows = await parseTXTFile(file);
-    else { showToast('Formato não suportado. Use .xlsx, .csv, .docx ou .txt.'); event.target.value=''; return; }
-    const parsed = extractComparativoRows(rows);
-    if(parsed.length===0){ showToast('Nenhuma linha com paciente/exame reconhecida no arquivo.'); event.target.value=''; return; }
+    const leitura = await impLerArquivo(file);
+    if(!leitura){ event.target.value=''; return; }
+    const parsed = extractComparativoRows(leitura.registros);
+    if(parsed.length===0){ impAvisoNadaEncontrado(leitura); event.target.value=''; return; }
     if(lado==='principal'){ data.principalLab = labName; data.principalArquivo = file.name; data.principalRows = parsed; }
     else { data.tercLab = labName; data.tercArquivo = file.name; data.tercRows = parsed; }
     render();
-    showToast(`Arquivo importado: ${parsed.length} registro(s) reconhecido(s).`);
+    const descartes = impResumoDescartes(leitura);
+    showToast(`Arquivo importado: ${parsed.length} registro(s) reconhecido(s).` + (descartes ? ` ${descartes}` : ''));
   }catch(err){
     console.error(err);
     showToast('Erro ao ler o arquivo: '+err.message);
@@ -5135,6 +5903,10 @@ function viewComparativo(){
           arquivos e lista, sempre com base no arquivo terceirizado, tudo que não foi encontrado (ou está com
           quantidade diferente) no arquivo do laboratório principal. Esta conferência não é salva em Lançamentos —
           reimportar um arquivo sempre SUBSTITUI o anterior daquele lado, nunca duplica.
+          Os arquivos (.xlsx, .csv, .docx, .txt ou .pdf) podem vir do jeito que o laboratório emite: títulos do
+          relatório, cabeçalhos repetidos nas quebras de página, números de página, rodapés e totais são
+          desconsiderados automaticamente — só as linhas de exames entram na comparação. O PDF precisa ser o
+          gerado pelo sistema do laboratório; PDF escaneado ou foto não pode ser lido.
         </div>
         ${(data.principalRows || data.tercRows) ? `<button class="btn ghost small edit-only" style="white-space:nowrap;" onclick="limparComparativoTab()">🗑 Limpar comparação desta aba</button>` : ''}
       </div>
@@ -5148,7 +5920,7 @@ function viewComparativo(){
         <div class="field edit-only" style="margin-bottom:10px;"><label>Laboratório</label><select id="cmpLabPrincipal">
           <option value="">Selecione…</option>${optsPrincipal}
         </select></div>
-        <input type="file" id="cmpFilePrincipal" accept=".xlsx,.xls,.csv,.docx,.txt" style="display:none" onchange="handleComparativoImport(event,'principal')">
+        <input type="file" id="cmpFilePrincipal" accept=".xlsx,.xls,.csv,.docx,.txt,.pdf" style="display:none" onchange="handleComparativoImport(event,'principal')">
         <button class="btn edit-only" onclick="document.getElementById('cmpFilePrincipal').click()">📥 Importar arquivo</button>
         ${data.principalRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.principalArquivo)}</b> — ${fmtNum(data.principalRows.length)} registro(s) — Laboratório: <b>${esc(data.principalLab)}</b> &nbsp;<button class="btn ghost small edit-only" style="padding:2px 6px;" onclick="resetComparativoLado('principal')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
         `}
@@ -5160,7 +5932,7 @@ function viewComparativo(){
         <div class="field edit-only" style="margin-bottom:10px;"><label>Laboratório</label><select id="cmpLabTerc">
           <option value="">Selecione…</option>${optsTerc}
         </select></div>
-        <input type="file" id="cmpFileTerc" accept=".xlsx,.xls,.csv,.docx,.txt" style="display:none" onchange="handleComparativoImport(event,'terceirizado')">
+        <input type="file" id="cmpFileTerc" accept=".xlsx,.xls,.csv,.docx,.txt,.pdf" style="display:none" onchange="handleComparativoImport(event,'terceirizado')">
         <button class="btn edit-only" onclick="document.getElementById('cmpFileTerc').click()">📥 Importar arquivo</button>
         ${data.tercRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.tercArquivo)}</b> — ${fmtNum(data.tercRows.length)} registro(s) — Laboratório: <b>${esc(data.tercLab)}</b> &nbsp;<button class="btn ghost small edit-only" style="padding:2px 6px;" onclick="resetComparativoLado('terceirizado')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
         `}
