@@ -388,6 +388,13 @@ body.com-rodape .sidebar{padding-bottom:40px;}
 .po-opt .po-ico.retrato{width:30px;height:42px;}
 .po-opt .po-ico.paisagem{width:42px;height:30px;}
 .po-opt b{display:block;font-size:13px;}
+/* Aviso de exame já cadastrado (Cadastros → Exames) */
+.exdup-box{max-width:560px;}
+.exdup-box h3{color:#8a5a1c;}
+.exdup-item{border:1px solid #F1D3AE;background:var(--amber-soft);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:12.5px;line-height:1.5;}
+.exdup-item b{color:var(--ink);}
+.exdup-acoes{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:14px;}
+.exdup-aviso{margin-top:10px;border:1px solid #F1D3AE;background:var(--amber-soft);color:#8a5a1c;border-radius:8px;padding:9px 12px;font-size:12px;line-height:1.5;}
 .po-opt span{display:block;font-size:11px;color:var(--ink-soft);margin-top:2px;}
 
 /* Etiqueta de numeração do relatório de glosas (ex.: 001.08.2026) */
@@ -563,6 +570,20 @@ body.com-rodape .sidebar{padding-bottom:40px;}
     </div>
     <div style="margin-top:16px;text-align:right;">
       <button class="btn secondary small" onclick="printOrientCancel()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Aviso de exame já cadastrado (Cadastros → Exames). Também fica fora da <div id="view">. -->
+<div class="print-orient-backdrop" id="exameDupDialog" onclick="if(event.target===this) exameDupFechar();">
+  <div class="print-orient-box exdup-box" role="alertdialog" aria-labelledby="exameDupTitulo">
+    <h3 id="exameDupTitulo">⚠️ Exame já cadastrado para este laboratório e tipo de convênio/processo</h3>
+    <div class="po-sub" id="exameDupTexto"></div>
+    <div id="exameDupLista"></div>
+    <div class="exdup-acoes">
+      <button class="btn" id="exameDupAbrir" onclick="exameDupAbrirExistente()">✏️ Abrir o já cadastrado</button>
+      <button class="btn secondary" onclick="exameDupConfirmar()">Cadastrar mesmo assim</button>
+      <button class="btn ghost" onclick="exameDupFechar()">Cancelar</button>
     </div>
   </div>
 </div>
@@ -935,9 +956,12 @@ function trocarCodigoAcesso(){
                                 descrição diferentes, duplicidade, quantidade, valor, exame não
                                 contratado/inativo/não cadastrado, fora da competência), com
                                 filtro por tipo e legenda; a importação passa a ler o valor do exame
+     4.29.2026  08/10/2026      Cadastros → Exames: aviso "Exame já cadastrado para este
+                                laboratório e tipo de convênio/processo" ao digitar e ao salvar
+                                (abrir o existente, cancelar ou cadastrar mesmo assim)
    ============================================================ */
 const APP_CRIACAO = { mes: 7, ano: 2026 };   // julho/2026 = mês 1
-const APP_ALTERACAO = 28;                     // nº acumulado de alterações publicadas
+const APP_ALTERACAO = 29;                     // nº acumulado de alterações publicadas
 const APP_DATA = '2026-10-08';                // data desta versão (AAAA-MM-DD)
 function appVersao(){
   const p = APP_DATA.split('-').map(Number);
@@ -3710,9 +3734,9 @@ function viewExames(){
           <option value="INATIVO" ${editing && editing.tipo==='INATIVO'?'selected':''}>Inativo</option>
         </select></div>
         <div class="field"><label>Quantidade total de exames</label><input id="exQtdTotal" type="number" min="0" value="${qtdTotalIni}" oninput="atualizarCotasCalculadasExame()"></div>
-        <div class="field" style="grid-column:span 2;"><label>Descrição do exame</label><input id="exDescricao" placeholder="Ex: Ácido Fólico" value="${editing?esc(editing.descricao):''}"></div>
-        <div class="field"><label>Laboratório</label><select id="exLab">${labsOpts || '<option value="">Cadastre um laboratório primeiro</option>'}</select></div>
-        <div class="field"><label>Tipo de convênio/processo</label><select id="exConvenio" onchange="atualizarCotasCalculadasExame()">
+        <div class="field" style="grid-column:span 2;"><label>Descrição do exame</label><input id="exDescricao" placeholder="Ex: Ácido Fólico" value="${editing?esc(editing.descricao):''}" oninput="atualizarAvisoExameDuplicado()"></div>
+        <div class="field"><label>Laboratório</label><select id="exLab" onchange="atualizarAvisoExameDuplicado()">${labsOpts || '<option value="">Cadastre um laboratório primeiro</option>'}</select></div>
+        <div class="field"><label>Tipo de convênio/processo</label><select id="exConvenio" onchange="atualizarCotasCalculadasExame();atualizarAvisoExameDuplicado()">
           ${STATE.tiposConvenio.map(t=>`<option value="${esc(t.cadastroValue)}" ${editing && editing.convenio===t.cadastroValue?'selected':''}>${esc(t.label)}</option>`).join('')}
         </select></div>
         <div class="field"><label>Período (vigência)</label><input id="exPeriodo" placeholder="Ex: 2026/2027" value="${editing?esc(editing.periodo):''}"></div>
@@ -3720,6 +3744,7 @@ function viewExames(){
         <div class="field"><label>Qtd. cota reserva <span class="muted" style="font-weight:400;">(calculada)</span></label><input id="exCotaR" type="number" value="${cotasIni.cotaReserva}" disabled style="background:#f0f2f2;"></div>
         <div class="field"><label>Valor unitário (R$)</label><input id="exValor" type="number" min="0" step="0.01" value="${editing?editing.valorUnit:0}"></div>
       </div>
+      <div id="exDupAviso" role="status">${editing ? avisoExameDuplicadoHTML(editing.descricao, editing.laboratorio, editing.convenio, editing.id) : ''}</div>
       <div class="muted" style="font-size:11.5px;margin-top:8px;">A cota principal e a cota reserva são recalculadas automaticamente a partir da quantidade total e do percentual configurado para o tipo de convênio/processo selecionado (módulo "Tipos de Convênio/Processo"). Se houver arredondamento, o valor maior fica com a cota principal.</div>
       <div style="margin-top:14px;display:flex;gap:8px;">
         ${editing
@@ -3873,7 +3898,74 @@ function removeApelido(id, idx){
   ex.apelidos.splice(idx,1);
   saveState(); render();
 }
-function saveExame(){
+/* ---------------- Aviso de exame já cadastrado ----------------
+   Mesmo exame = mesma descrição (sem diferenciar maiúscula, acento ou espaço a mais) — ou
+   o nome digitado já é um apelido do exame —, no MESMO laboratório e no MESMO tipo de
+   convênio/processo. O aviso aparece embaixo do formulário enquanto se digita e, ao salvar,
+   numa janela que deixa abrir o exame existente, cancelar ou cadastrar mesmo assim (ex.: o
+   mesmo exame numa nova vigência). Só avisa: nenhum exame já cadastrado é alterado. */
+function examesDuplicados(descricao, laboratorio, convenio, ignorarId){
+  const d = normTxt(descricao), lab = normTxt(laboratorio);
+  if(!d || !lab) return [];
+  return STATE.exames.filter(e=>e.id!==ignorarId && normTxt(e.laboratorio)===lab && e.convenio===convenio &&
+    (normTxt(e.descricao)===d || (e.apelidos||[]).some(a=>normTxt(a)===d)));
+}
+function rotuloConvenioCadastro(cadastroValue){
+  return (STATE.tiposConvenio.find(t=>t.cadastroValue===cadastroValue)||{}).label || cadastroValue || '—';
+}
+function avisoExameDuplicadoHTML(descricao, laboratorio, convenio, ignorarId){
+  const dups = examesDuplicados(descricao, laboratorio, convenio, ignorarId);
+  if(!dups.length) return '';
+  const viaApelido = dups.every(e=>normTxt(e.descricao)!==normTxt(descricao));
+  return `<div class="exdup-aviso">⚠️ <b>Exame já cadastrado para este laboratório e tipo de convênio/processo</b>${
+    viaApelido ? ` — o nome digitado é um nome alternativo (apelido) de <b>${esc(dups[0].descricao)}</b>` : ''
+  }${dups.length>1 ? ` (${dups.length} cadastros iguais)` : ''}. Período do já cadastrado: <b>${esc(dups[0].periodo)||'não informado'}</b>.</div>`;
+}
+function atualizarAvisoExameDuplicado(){
+  const el = document.getElementById('exDupAviso');
+  if(!el) return;
+  el.innerHTML = avisoExameDuplicadoHTML(
+    document.getElementById('exDescricao')?.value || '',
+    document.getElementById('exLab')?.value || '',
+    document.getElementById('exConvenio')?.value || '',
+    editingExameId);
+}
+let exameDupPendente = null;   // exames encontrados enquanto a janela de aviso está aberta
+function exameDupAbrir(dups, descricao, laboratorio, convenio){
+  exameDupPendente = dups;
+  const item = e=>{
+    const viaApelido = normTxt(e.descricao)!==normTxt(descricao);
+    return `<div class="exdup-item">
+      <b>${esc(e.descricao)}</b>${viaApelido ? ` <span class="muted">— “${esc(descricao)}” já é um nome alternativo (apelido) deste exame</span>` : ''}<br>
+      Status: <b>${esc(e.tipo==='ATIVO'?'Ativo':'Inativo')}</b> · Período: <b>${esc(e.periodo)||'não informado'}</b> ·
+      Qtd total: <b>${fmtNum(e.qtdTotal ?? (e.cotaPrincipal+e.cotaReserva))}</b> · Valor unitário: <b>${fmtMoney(e.valorUnit)}</b>
+    </div>`;
+  };
+  document.getElementById('exameDupTexto').innerHTML =
+    `“<b>${esc(descricao)}</b>” já está cadastrado para o laboratório <b>${esc(laboratorio)}</b> no tipo de convênio/processo <b>${esc(rotuloConvenioCadastro(convenio))}</b>:`;
+  document.getElementById('exameDupLista').innerHTML = dups.map(item).join('') +
+    `<div class="muted" style="font-size:11.5px;">Use “${editingExameId ? 'Salvar' : 'Cadastrar'} mesmo assim” só se for mesmo outro item — por exemplo, o mesmo exame numa nova vigência (período) do contrato.</div>`;
+  document.querySelector('#exameDupDialog .btn.secondary').textContent = editingExameId ? 'Salvar mesmo assim' : 'Cadastrar mesmo assim';
+  document.getElementById('exameDupDialog').classList.add('open');
+  setTimeout(()=>document.getElementById('exameDupAbrir')?.focus(), 0);
+}
+function exameDupFechar(){
+  exameDupPendente = null;
+  document.getElementById('exameDupDialog')?.classList.remove('open');
+}
+function exameDupAbrirExistente(){
+  const alvo = exameDupPendente && exameDupPendente[0];
+  exameDupFechar();
+  if(alvo) editExame(alvo.id);
+}
+function exameDupConfirmar(){
+  exameDupFechar();
+  saveExame(true);
+}
+document.addEventListener('keydown', ev=>{
+  if(ev.key==='Escape' && document.getElementById('exameDupDialog')?.classList.contains('open')) exameDupFechar();
+});
+function saveExame(forcar){
   if(semPermissao('exames')) return;
   const descricao = document.getElementById('exDescricao').value.trim();
   const laboratorio = document.getElementById('exLab').value;
@@ -3893,6 +3985,16 @@ function saveExame(){
     cotaReserva,
     valorUnit: Number(document.getElementById('exValor').value)||0,
   };
+  // Exame já cadastrado para o mesmo laboratório e tipo de convênio/processo: avisa antes de
+  // salvar. Na edição, só avisa se a descrição, o laboratório ou o convênio forem mudados
+  // (para não incomodar a cada ajuste de valor num exame que já era repetido).
+  if(forcar!==true){
+    const original = editingExameId ? STATE.exames.find(e=>e.id===editingExameId) : null;
+    const mudou = !original || normTxt(original.descricao)!==normTxt(descricao)
+      || normTxt(original.laboratorio)!==normTxt(laboratorio) || original.convenio!==convenio;
+    const dups = mudou ? examesDuplicados(descricao, laboratorio, convenio, editingExameId) : [];
+    if(dups.length){ exameDupAbrir(dups, descricao, laboratorio, convenio); return; }
+  }
   if(editingExameId){
     const ex = STATE.exames.find(e=>e.id===editingExameId);
     if(!ex){ editingExameId=null; render(); return; }
