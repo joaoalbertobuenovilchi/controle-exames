@@ -210,6 +210,19 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 .cmp-nomes-titulo{font-weight:800;color:#28588F;font-size:13px;margin-bottom:3px;}
 .cmp-nomes table{background:#fff;}
 mark.cmp-dif{background:#FFE7A8;color:inherit;padding:0 2px;border-radius:3px;}
+.cmp-lancar{border-color:#F3CFCB;background:#FFF7F6;}
+.cmp-lancar .cmp-nomes-titulo{color:var(--red);}
+.cmp-lancados{border-color:#CFE6D6;background:#F4FBF6;}
+.cmp-lancados .cmp-nomes-titulo{color:var(--green);}
+.cmp-lancar-item{display:flex;gap:7px;align-items:flex-start;padding:3px 0;cursor:pointer;}
+.cmp-lancar-item input{margin-top:3px;}
+/* Pasta de trabalho no computador (CONFERÊNCIA / LANÇAMENTOS) */
+.pasta-barra{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border:1px dashed #BFD9D7;background:#F6FBFB;border-radius:8px;padding:8px 12px;font-size:12px;color:var(--teal-dark);margin:0 0 14px;line-height:1.5;}
+.card .pasta-barra{margin:12px 0 0;}
+/* Janela "Salvar arquivos corrigidos" */
+.cmpsalvar-box{max-width:560px;}
+.cmpsalvar-item{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12.5px;}
+.cmpsalvar-item input[type=text], .cmpsalvar-item input:not([type]){width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;font-family:inherit;}
 @media print{ .cmp-nomes-acao{ display:none !important; } }
 .cmp-legenda{margin-top:12px;font-size:12px;color:var(--ink-soft);}
 .cmp-legenda summary{cursor:pointer;font-weight:700;color:var(--teal-dark);}
@@ -595,6 +608,19 @@ body.com-rodape .sidebar{padding-bottom:40px;}
   </div>
 </div>
 
+<!-- Salvar as cópias corrigidas dos arquivos do Comparativo (pasta LANÇAMENTOS ou Downloads). -->
+<div class="print-orient-backdrop" id="cmpSalvarDialog" onclick="if(event.target===this) cmpSalvarFechar();">
+  <div class="print-orient-box cmpsalvar-box" role="dialog" aria-labelledby="cmpSalvarTitulo">
+    <h3 id="cmpSalvarTitulo">💾 Salvar arquivos corrigidos</h3>
+    <div class="po-sub" id="cmpSalvarTexto"></div>
+    <div id="cmpSalvarCampos"></div>
+    <div class="exdup-acoes">
+      <button class="btn" onclick="cmpSalvarConfirmar()">💾 Salvar</button>
+      <button class="btn ghost" onclick="cmpSalvarFechar()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -969,9 +995,14 @@ function trocarCodigoAcesso(){
      4.30.2026  08/10/2026      Comparativo: no filtro "Nome do paciente diferente", conferência
                                 nome por nome — "Manter nome" retira a inconsistência (fica gravado
                                 para as próximas conferências) e "Nomes confirmados" permite desfazer
+     4.31.2026  08/10/2026      Comparativo nos dois sentidos (paciente/exame não encontrado no
+                                terceirizado); "Lançar", paciente por paciente, os exames que faltam
+                                na cópia corrigida do arquivo do outro laboratório; "Salvar arquivos
+                                corrigidos" na pasta de trabalho (CONFERÊNCIA/LANÇAMENTOS no Chrome/
+                                Edge, ou Downloads); Lançar Exames importa direto da pasta LANÇAMENTOS
    ============================================================ */
 const APP_CRIACAO = { mes: 7, ano: 2026 };   // julho/2026 = mês 1
-const APP_ALTERACAO = 30;                     // nº acumulado de alterações publicadas
+const APP_ALTERACAO = 31;                     // nº acumulado de alterações publicadas
 const APP_DATA = '2026-10-08';                // data desta versão (AAAA-MM-DD)
 function appVersao(){
   const p = APP_DATA.split('-').map(Number);
@@ -4281,12 +4312,13 @@ function viewLancamento(){
         </div>
         <div>
           <input type="file" id="importFile" accept=".xlsx,.xls,.csv,.docx,.txt,.pdf" style="display:none" onchange="handleImportFile(event)">
-          <button class="btn" onclick="document.getElementById('importFile').click()">📥 Importar arquivo</button>
+          <button class="btn" onclick="lancAbrirImportacao()">📥 Importar arquivo</button>
         </div>
       </div>
       <div class="helpbox" style="margin-top:12px;">
-        O arquivo pode ser importado do jeito que o laboratório emite: o sistema localiza sozinho a linha com os títulos das colunas (<b>Paciente, Data, Exame</b> ou <b>Descrição do Exame</b>, <b>Quantidade</b> e, se houver, <b>Laboratório, Unidade, Resultado</b> — os nomes podem variar um pouco) e aproveita <b>somente as linhas de exames</b>. Títulos do relatório, cabeçalhos repetidos nas quebras de página, números de página, rodapés, totais, subtotais e assinaturas são desconsiderados automaticamente. O <b>PDF</b> precisa ser o gerado pelo sistema do laboratório (com texto que dá para selecionar); PDF escaneado ou foto não pode ser lido. Cada exame informado precisa já existir no <b>Cadastro de Exames</b> com o mesmo nome (ou apelido cadastrado — vale também a sigla/código que o laboratório usa, ex.: "COIN"), laboratório e convênio desta aba (${convenioLabel(lancTab)}) — do contrário a linha será ignorada e listada no aviso ao final da importação.
+        Os arquivos corrigidos no <b>Comparativo entre Laboratórios</b> ficam na pasta <b>LANÇAMENTOS</b> e já vêm prontos para importar aqui (um arquivo por laboratório). O arquivo também pode ser importado do jeito que o laboratório emite: o sistema localiza sozinho a linha com os títulos das colunas (<b>Paciente, Data, Exame</b> ou <b>Descrição do Exame</b>, <b>Quantidade</b> e, se houver, <b>Laboratório, Unidade, Resultado</b> — os nomes podem variar um pouco) e aproveita <b>somente as linhas de exames</b>. Títulos do relatório, cabeçalhos repetidos nas quebras de página, números de página, rodapés, totais, subtotais e assinaturas são desconsiderados automaticamente. O <b>PDF</b> precisa ser o gerado pelo sistema do laboratório (com texto que dá para selecionar); PDF escaneado ou foto não pode ser lido. Cada exame informado precisa já existir no <b>Cadastro de Exames</b> com o mesmo nome (ou apelido cadastrado — vale também a sigla/código que o laboratório usa, ex.: "COIN"), laboratório e convênio desta aba (${convenioLabel(lancTab)}) — do contrário a linha será ignorada e listada no aviso ao final da importação.
       </div>
+      ${pastaTrabalhoHTML('lancamento')}
       ${ultimoLoteVisivelHtml()}
     </div>
 
@@ -5348,9 +5380,18 @@ function impAvisoNadaEncontrado(leitura){
   }
 }
 async function handleImportFile(e){
-  if(semPermissao('lancamento')){ e.target.value=''; return; }
   const file = e.target.files[0];
-  if(!file) return;
+  e.target.value = '';
+  if(file) await lancImportarArquivo(file);
+}
+/* Botão "Importar arquivo" do Lançar Exames: abre a escolha já dentro da pasta LANÇAMENTOS
+   (arquivos corrigidos pelo Comparativo), quando há pasta de trabalho no Chrome/Edge. */
+function lancAbrirImportacao(){
+  if(semPermissao('lancamento')) return;
+  importarDaPasta('lancamentos', lancImportarArquivo, 'importFile');
+}
+async function lancImportarArquivo(file){
+  if(semPermissao('lancamento')) return;
   try{
     const leitura = await impLerArquivo(file);
     if(leitura) importLancamentosFromRows(leitura, file.name);
@@ -5358,7 +5399,6 @@ async function handleImportFile(e){
     console.error(err);
     showToast('Erro ao ler o arquivo: '+err.message);
   }
-  e.target.value = '';
 }
 function importLancamentosFromRows(leitura, nomeArquivo){
   const rows = (leitura && leitura.registros) || [];
@@ -5371,10 +5411,15 @@ function importLancamentosFromRows(leitura, nomeArquivo){
   // Nome exatamente igual à descrição cadastrada OU a algum apelido/nome alternativo cadastrado
   // (ex.: "PPF" cadastrado como apelido de "Parasitológico de Fezes"), respeitando o laboratório
   // quando ele vier no arquivo.
+  // Quando o arquivo traz a coluna Laboratório com um laboratório cadastrado, o exame só é
+  // procurado no cadastro daquele laboratório — nunca é lançado para outro laboratório que
+  // tenha um exame com o mesmo nome. Nome de laboratório desconhecido (escrito de outro jeito
+  // pelo próprio laboratório) é ignorado, como sempre foi.
+  const labsCadastrados = new Set(STATE.exames.map(e=>normTxt(e.laboratorio)));
+  const doLab = (e, labVal) => !labVal || !labsCadastrados.has(normTxt(labVal)) || normTxt(e.laboratorio)===normTxt(labVal);
   const exato = (texto, labVal) => {
     if(!normTxt(texto)) return null;
-    return ativos.find(e => exameNomesPossiveis(e).some(n => impMesmoNomeExame(n, texto)) &&
-      (!labVal || e.laboratorio.toLowerCase()===labVal.toLowerCase())) || null;
+    return ativos.find(e => exameNomesPossiveis(e).some(n => impMesmoNomeExame(n, texto)) && doLab(e, labVal)) || null;
   };
   rows.forEach(r=>{
     const pacienteVal = r.paciente;
@@ -5389,7 +5434,7 @@ function importLancamentosFromRows(leitura, nomeArquivo){
     for(let i=0; !exame && i<r.exameAlt.length; i++) exame = exato(r.exameAlt[i], labVal);
     // 3ª tentativa: correspondência parcial (um contém o outro), também considerando apelidos —
     // só pelo nome do exame, nunca por sigla curta.
-    if(!exame && r.exame) exame = ativos.find(e => exameCasaComTexto(e, r.exame)) || null;
+    if(!exame && r.exame) exame = ativos.find(e => doLab(e, labVal) && exameCasaComTexto(e, r.exame)) || null;
     if(!exame){
       ignorados.push(r.exame && r.exameAlt.length ? `${r.exame} (${r.exameAlt[0]})` : (r.exame || r.exameAlt[0]));
       return;
@@ -5923,6 +5968,122 @@ function restaurarCompetencia(){
 }
 
 /* ============================================================
+   PASTA DE TRABALHO NO COMPUTADOR (CONFERÊNCIA e LANÇAMENTOS)
+   ============================================================
+   O usuário escolhe uma pasta do computador e o sistema cria dentro dela:
+   - CONFERÊNCIA: onde ficam os arquivos dos laboratórios a importar no Comparativo;
+   - LANÇAMENTOS: onde o Comparativo salva os arquivos corrigidos, que depois são
+     importados em 3. Lançamentos → Lançar Exames.
+   Só o Google Chrome e o Microsoft Edge deixam um site usar pastas do computador (e sempre
+   com a autorização do usuário). Nos outros navegadores tudo continua funcionando como
+   antes: escolhe-se o arquivo normalmente e os arquivos corrigidos vão para Downloads.
+   A pasta escolhida fica guardada só neste computador/navegador (IndexedDB) — nada vai
+   para a nuvem nem para os dados do sistema. */
+const PASTA_CONFERENCIA = 'CONFERÊNCIA';
+const PASTA_LANCAMENTOS = 'LANÇAMENTOS';
+let pastaTrabalho = null;   // { raiz, conferencia, lancamentos } — FileSystemDirectoryHandle
+function pastaSuportada(){ return typeof window.showDirectoryPicker === 'function'; }
+function pastaIdb(){
+  return new Promise((resolve, reject)=>{
+    const rq = indexedDB.open('controleExamesPastas', 1);
+    rq.onupgradeneeded = ()=>rq.result.createObjectStore('handles');
+    rq.onsuccess = ()=>resolve(rq.result);
+    rq.onerror = ()=>reject(rq.error);
+  });
+}
+async function pastaGuardar(valor){
+  const db = await pastaIdb();
+  await new Promise((resolve, reject)=>{
+    const tx = db.transaction('handles', 'readwrite');
+    tx.objectStore('handles').put(valor, 'pastaTrabalho');
+    tx.oncomplete = resolve; tx.onerror = ()=>reject(tx.error);
+  });
+}
+async function pastaCarregar(){
+  try{
+    const db = await pastaIdb();
+    return await new Promise(resolve=>{
+      const rq = db.transaction('handles', 'readonly').objectStore('handles').get('pastaTrabalho');
+      rq.onsuccess = ()=>resolve(rq.result || null);
+      rq.onerror = ()=>resolve(null);
+    });
+  }catch(e){ return null; }
+}
+async function pastaIniciar(){
+  if(!pastaSuportada()) return;
+  const p = await pastaCarregar();
+  if(p && p.raiz && p.conferencia && p.lancamentos){
+    pastaTrabalho = p;
+    const app = document.getElementById('app');
+    if(app && app.style.display!=='none' && ['comparativo','lancamento'].includes(currentView)) render();
+  }
+}
+/* Pede (se ainda não tiver) a autorização do navegador para ler e gravar na pasta */
+async function pastaPermitir(h){
+  if(!h || typeof h.queryPermission!=='function') return false;
+  const op = { mode:'readwrite' };
+  if(await h.queryPermission(op)==='granted') return true;
+  try{ return (await h.requestPermission(op))==='granted'; }catch(e){ return false; }
+}
+async function escolherPastaTrabalho(){
+  if(!pastaSuportada()){
+    alert('Este navegador não permite que o sistema use uma pasta do computador.\n\nUse o Google Chrome ou o Microsoft Edge. Enquanto isso, escolha os arquivos normalmente — os arquivos corrigidos irão para a pasta Downloads.');
+    return;
+  }
+  let raiz;
+  try{ raiz = await window.showDirectoryPicker({ id:'controleExames', mode:'readwrite', startIn:'documents' }); }
+  catch(e){ if(e && e.name!=='AbortError') showToast('Não foi possível usar essa pasta: '+e.message, 'error'); return; }
+  try{
+    const conferencia = await raiz.getDirectoryHandle(PASTA_CONFERENCIA, { create:true });
+    const lancamentos = await raiz.getDirectoryHandle(PASTA_LANCAMENTOS, { create:true });
+    pastaTrabalho = { raiz, conferencia, lancamentos };
+    await pastaGuardar(pastaTrabalho);
+    render();
+    showToast(`Pasta de trabalho: “${raiz.name}”, com as pastas ${PASTA_CONFERENCIA} e ${PASTA_LANCAMENTOS}.`, 'success');
+  }catch(e){
+    console.error(e);
+    showToast('Não foi possível criar as pastas: '+e.message, 'error');
+  }
+}
+/* Faixa que mostra a pasta de trabalho (Comparativo e Lançar Exames) */
+function pastaTrabalhoHTML(uso){
+  if(!pastaSuportada()){
+    return `<div class="pasta-barra muted">📁 Para usar as pastas ${PASTA_CONFERENCIA} e ${PASTA_LANCAMENTOS} do computador, abra o sistema no <b>Google Chrome</b> ou no <b>Microsoft Edge</b>. Neste navegador os arquivos são escolhidos normalmente e os corrigidos vão para <b>Downloads</b>.</div>`;
+  }
+  if(!pastaTrabalho){
+    return `<div class="pasta-barra">📁 <span>Escolha uma <b>pasta de trabalho</b> no computador (ex.: Documentos\\Controle de Exames): o sistema cria nela as pastas <b>${PASTA_CONFERENCIA}</b> (arquivos dos laboratórios para conferir) e <b>${PASTA_LANCAMENTOS}</b> (arquivos corrigidos para Lançar Exames).</span>
+      <button class="btn small edit-only" onclick="escolherPastaTrabalho()">📁 Escolher pasta</button></div>`;
+  }
+  const onde = uso==='lancamento'
+    ? `os arquivos corrigidos ficam em <b>${PASTA_LANCAMENTOS}</b> — o botão Importar já abre nessa pasta`
+    : `coloque os arquivos dos laboratórios em <b>${PASTA_CONFERENCIA}</b>; os arquivos corrigidos são salvos em <b>${PASTA_LANCAMENTOS}</b>`;
+  return `<div class="pasta-barra">📁 <span>Pasta de trabalho: <b>${esc(pastaTrabalho.raiz.name)}</b> — ${onde}.</span>
+    <button class="btn ghost small edit-only" onclick="escolherPastaTrabalho()">Trocar pasta</button></div>`;
+}
+/* Abre a escolha de arquivo já dentro da subpasta (CONFERÊNCIA ou LANÇAMENTOS). Sem pasta
+   de trabalho (ou fora do Chrome/Edge), usa o campo de arquivo de sempre. */
+async function importarDaPasta(sub, aoEscolher, inputId){
+  const dir = pastaTrabalho && pastaTrabalho[sub];
+  if(!dir || typeof window.showOpenFilePicker!=='function'){ document.getElementById(inputId)?.click(); return; }
+  let fh;
+  try{ [fh] = await window.showOpenFilePicker({ startIn:dir, multiple:false }); }
+  catch(e){
+    if(e && e.name==='AbortError') return;
+    console.warn(e);
+    document.getElementById(inputId)?.click();
+    return;
+  }
+  try{ aoEscolher(await fh.getFile()); }
+  catch(e){ console.error(e); showToast('Não foi possível abrir o arquivo: '+e.message, 'error'); }
+}
+function baixarArquivo(blob, nome){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);
+}
+
+/* ============================================================
    COMPARATIVO ENTRE LABORATÓRIOS
    ============================================================
    Compara o arquivo importado do laboratório PRINCIPAL (PÚBLICO) com o arquivo
@@ -5937,11 +6098,26 @@ function restaurarCompetencia(){
    Lançamentos nem afeta qualquer outro dado já cadastrado no sistema.
    ============================================================ */
 let comparativoTab = null; // resolvido dinamicamente para o primeiro tipo de convênio/processo disponível
-let comparativoState = {}; // { [tipoKey]: {principalLab, principalArquivo, principalRows, tercLab, tercArquivo, tercRows} }
+let comparativoState = {}; // { [tipoKey]: cmpDadosVazios() preenchido } — só na memória da tela
 
+/* principalLancados/tercLancados: exames lançados na própria conferência — entram na cópia
+   corrigida do arquivo daquele laboratório (ver "Salvar arquivos corrigidos"). */
+function cmpDadosVazios(){
+  return { principalLab:'', principalArquivo:'', principalRows:null, principalLancados:[],
+           tercLab:'', tercArquivo:'', tercRows:null, tercLancados:[],
+           lancadosVersao:0, alteracoesNaoSalvas:false };
+}
 function comparativoDataFor(tipoKey){
-  if(!comparativoState[tipoKey]) comparativoState[tipoKey] = { principalLab:'', principalArquivo:'', principalRows:null, tercLab:'', tercArquivo:'', tercRows:null };
+  if(!comparativoState[tipoKey]) comparativoState[tipoKey] = cmpDadosVazios();
   return comparativoState[tipoKey];
+}
+/* Sempre que a lista de exames lançados na conferência muda: refaz a conferência e marca
+   que há correções ainda não salvas em arquivo. */
+function cmpMarcarLancamentos(data, alterou){
+  data.lancadosVersao = (data.lancadosVersao||0) + 1;
+  const total = (data.principalLancados||[]).length + (data.tercLancados||[]).length;
+  if(alterou) data.alteracoesNaoSalvas = total>0 || !!data.jaSalvou;   // desfez depois de salvar: arquivo salvo ficou velho
+  else if(!total && !data.jaSalvou) data.alteracoesNaoSalvas = false;
 }
 function setComparativoTab(t){ comparativoTab = t; render(); }
 /* Normaliza texto para comparação (maiúsculas, sem acentos, sem espaços duplicados) */
@@ -5979,21 +6155,36 @@ function extractComparativoRows(registros){
   })).filter(r=>r.paciente || r.exame);
 }
 async function handleComparativoImport(event, lado){
-  if(semPermissao('comparativo')){ event.target.value=''; return; }
   const file = event.target.files[0];
-  if(!file) return;
+  event.target.value = '';
+  if(file) await comparativoImportarArquivo(file, lado);
+}
+/* Botão "Importar arquivo" do Comparativo: confere permissão e laboratório e abre a escolha
+   do arquivo já dentro da pasta CONFERÊNCIA (quando há pasta de trabalho no Chrome/Edge). */
+function cmpAbrirImportacao(lado){
+  if(semPermissao('comparativo')) return;
+  const labEl = document.getElementById(lado==='principal' ? 'cmpLabPrincipal' : 'cmpLabTerc');
+  if(!labEl || !labEl.value){ showToast('Selecione o laboratório antes de importar o arquivo.'); return; }
+  importarDaPasta('conferencia', f=>comparativoImportarArquivo(f, lado), lado==='principal' ? 'cmpFilePrincipal' : 'cmpFileTerc');
+}
+async function comparativoImportarArquivo(file, lado){
+  if(semPermissao('comparativo')) return;
   const data = comparativoDataFor(comparativoTab);
-  const labSelectId = lado==='principal' ? 'cmpLabPrincipal' : 'cmpLabTerc';
-  const labEl = document.getElementById(labSelectId);
+  const labEl = document.getElementById(lado==='principal' ? 'cmpLabPrincipal' : 'cmpLabTerc');
   const labName = labEl ? labEl.value : '';
-  if(!labName){ showToast('Selecione o laboratório antes de importar o arquivo.'); event.target.value=''; return; }
+  if(!labName){ showToast('Selecione o laboratório antes de importar o arquivo.'); return; }
+  const lancadosLado = lado==='principal' ? (data.principalLancados||[]) : (data.tercLancados||[]);
+  if(lancadosLado.length && data.alteracoesNaoSalvas &&
+     !confirm(`Há ${lancadosLado.length} exame(s) lançado(s) na conferência neste arquivo que ainda não foram salvos. Ao importar outro arquivo eles serão descartados. Continuar?`)) return;
   try{
     const leitura = await impLerArquivo(file);
-    if(!leitura){ event.target.value=''; return; }
+    if(!leitura) return;
     const parsed = extractComparativoRows(leitura.registros);
-    if(parsed.length===0){ impAvisoNadaEncontrado(leitura); event.target.value=''; return; }
-    if(lado==='principal'){ data.principalLab = labName; data.principalArquivo = file.name; data.principalRows = parsed; }
-    else { data.tercLab = labName; data.tercArquivo = file.name; data.tercRows = parsed; }
+    if(parsed.length===0){ impAvisoNadaEncontrado(leitura); return; }
+    // o arquivo novo substitui o anterior daquele lado — inclusive os exames lançados nele
+    if(lado==='principal'){ data.principalLab = labName; data.principalArquivo = file.name; data.principalRows = parsed; data.principalLancados = []; }
+    else { data.tercLab = labName; data.tercArquivo = file.name; data.tercRows = parsed; data.tercLancados = []; }
+    cmpMarcarLancamentos(data);
     render();
     const descartes = impResumoDescartes(leitura);
     showToast(`Arquivo importado: ${parsed.length} registro(s) reconhecido(s).` + (descartes ? ` ${descartes}` : ''));
@@ -6001,13 +6192,16 @@ async function handleComparativoImport(event, lado){
     console.error(err);
     showToast('Erro ao ler o arquivo: '+err.message);
   }
-  event.target.value = '';
 }
 function resetComparativoLado(lado){
   if(semPermissao('comparativo')) return;
   const data = comparativoDataFor(comparativoTab);
-  if(lado==='principal'){ data.principalLab=''; data.principalArquivo=''; data.principalRows=null; }
-  else { data.tercLab=''; data.tercArquivo=''; data.tercRows=null; }
+  const lancadosLado = lado==='principal' ? (data.principalLancados||[]) : (data.tercLancados||[]);
+  if(lancadosLado.length && data.alteracoesNaoSalvas &&
+     !confirm(`Há ${lancadosLado.length} exame(s) lançado(s) na conferência neste arquivo que ainda não foram salvos. Excluir o arquivo descarta esses lançamentos. Continuar?`)) return;
+  if(lado==='principal'){ data.principalLab=''; data.principalArquivo=''; data.principalRows=null; data.principalLancados=[]; }
+  else { data.tercLab=''; data.tercArquivo=''; data.tercRows=null; data.tercLancados=[]; }
+  cmpMarcarLancamentos(data);
   render();
 }
 /* Excluir/limpar de uma vez os dois arquivos importados (Principal e Terceirizado) da aba
@@ -6018,8 +6212,10 @@ function limparComparativoTab(){
   if(semPermissao('comparativo')) return;
   const data = comparativoDataFor(comparativoTab);
   if(!data.principalRows && !data.tercRows) return;
-  if(!confirm(`Limpar os arquivos importados do Comparativo na aba ${convenioLabel(comparativoTab)}? Isso não apaga nenhum lançamento nem exame cadastrado — apenas os arquivos importados para esta conferência.`)) return;
-  comparativoState[comparativoTab] = { principalLab:'', principalArquivo:'', principalRows:null, tercLab:'', tercArquivo:'', tercRows:null };
+  const pendentes = data.alteracoesNaoSalvas ? (data.principalLancados||[]).length + (data.tercLancados||[]).length : 0;
+  if(!confirm(`Limpar os arquivos importados do Comparativo na aba ${convenioLabel(comparativoTab)}? Isso não apaga nenhum lançamento nem exame cadastrado — apenas os arquivos importados para esta conferência.`
+     + (pendentes ? `\n\nAtenção: ${pendentes} exame(s) lançado(s) na conferência ainda não foram salvos em arquivo e serão descartados.` : ''))) return;
+  comparativoState[comparativoTab] = cmpDadosVazios();
   render();
   showToast('Comparação desta aba foi limpa.');
 }
@@ -6032,6 +6228,10 @@ const CMP_TIPOS = [
     texto:'Nenhum exame deste paciente aparece no arquivo do laboratório principal — nem com nome parecido.' },
   { key:'EXAME_NAO_ENCONTRADO', cor:'grave', rotulo:'Exame não encontrado para o paciente',
     texto:'O paciente está no arquivo principal, mas este exame não consta para ele (nem com nome parecido).' },
+  { key:'PACIENTE_NAO_ENCONTRADO_TERC', cor:'grave', rotulo:'Paciente não encontrado no terceirizado',
+    texto:'O paciente está no arquivo do laboratório principal, mas nenhum exame dele aparece no arquivo terceirizado — nem com nome parecido.' },
+  { key:'EXAME_NAO_ENCONTRADO_TERC', cor:'grave', rotulo:'Exame não encontrado no terceirizado',
+    texto:'O exame está no arquivo principal para o paciente, mas não aparece para ele no arquivo terceirizado.' },
   { key:'DUPLICIDADE', cor:'grave', rotulo:'Exame em duplicidade',
     texto:'O mesmo exame aparece para o paciente mais vezes no arquivo terceirizado do que no principal.' },
   { key:'EXAME_FORA_CONTRATO', cor:'grave', rotulo:'Exame não contratado com o laboratório',
@@ -6141,7 +6341,7 @@ function computeComparativoInconsistencias(data){
   const cadConv = cadastroValueFor(comparativoTab);
   const assinatura = [comparativoTab, cadConv, data.tercLab, STATE.competencia.mes, STATE.competencia.ano,
     STATE.exames.map(e=>[e.id, e.descricao, (e.apelidos||[]).join('/'), e.laboratorio, e.convenio, e.tipo, e.valorUnit].join('~')).join('|'),
-    (STATE.pacientesNomesConfirmados||[]).map(c=>c.chave).join('|')].join('#');
+    (STATE.pacientesNomesConfirmados||[]).map(c=>c.chave).join('|'), data.principalLab, data.lancadosVersao||0].join('#');
   const c = data._conferencia;
   if(c && c.p===data.principalRows && c.t===data.tercRows && c.assinatura===assinatura) return c.res;
   const res = cmpConferir(data, cadConv);
@@ -6160,7 +6360,9 @@ function cmpConferir(data, cadConv){
     return { r, pac:cmpNomePac(r.paciente), chaves:x.chaves, regs:x.regs, aprox:x.aprox, texto:textos[0] || '',
              nomes:[r.exameArquivo || r.exame, r.exame].filter(Boolean), usado:false };
   };
-  const P = data.principalRows.map(preparar), T = data.tercRows.map(preparar);
+  // arquivos importados + exames lançados na própria conferência (cópia corrigida de cada arquivo)
+  const P = data.principalRows.concat(data.principalLancados||[]).map(preparar);
+  const T = data.tercRows.concat(data.tercLancados||[]).map(preparar);
   const porPac = new Map();
   P.forEach(p=>{ if(!porPac.has(p.pac)) porPac.set(p.pac, []); porPac.get(p.pac).push(p); });
   const mesmoExame = (a,b)=>{ for(const k of a.chaves) if(b.chaves.has(k)) return true; return false; };
@@ -6270,6 +6472,7 @@ function cmpConferir(data, cadConv){
     problemas.forEach(p=>{ porTipo[p.key]++; });
     const ref = contrato || t.regs[0] || null;
     linhas.push({
+      lado:'terceirizado',
       paciente:r.paciente, data:r.data, quantidade:r.quantidade, valor:r.valor ?? null,
       exameArquivo:r.exameArquivo || r.exame || '', exame:ref ? ref.descricao : (r.exame || r.exameArquivo || ''),
       qtdPrincipal:t.par ? t.par.r.quantidade : null,
@@ -6277,8 +6480,47 @@ function cmpConferir(data, cadConv){
       problemas,
     });
   });
+  const linhasTerc = linhas.length;
+
+  // Outro sentido: exames do PRINCIPAL que não foram encontrados no terceirizado (nenhuma
+  // linha do terceirizado "usou" a linha do principal em nenhuma das etapas acima)
+  const porPacT = new Map();
+  T.forEach(t=>{ if(!porPacT.has(t.pac)) porPacT.set(t.pac, []); porPacT.get(t.pac).push(t); });
+  const nomesTerc = [...porPacT.keys()];
+  const labP = normTxt(data.principalLab);
+  P.forEach(p=>{
+    if(p.usado) return;
+    const r = p.r;
+    let noTerc = porPacT.get(p.pac), como = '';
+    if(!noTerc && p.pac){
+      const c = nomesTerc.map(n=>({ n, s:cmpNomeParecido(p.pac, n) })).filter(o=>o.s>=0.85).sort((a,b)=>b.s-a.s)[0];
+      if(c){ noTerc = porPacT.get(c.n); como = noTerc[0].r.paciente; }
+    }
+    let problema;
+    if(noTerc){
+      const mesmos = noTerc.filter(t=>mesmoExame(t,p)).length;
+      const tem = [...new Set(noTerc.map(t=>t.r.exame || t.r.exameArquivo))];
+      problema = { key:'EXAME_NAO_ENCONTRADO_TERC', detalhe: mesmos
+        ? `Aparece ${P.filter(x=>x.pac===p.pac && mesmoExame(x,p)).length}× no principal e ${mesmos}× no terceirizado`
+        : (como ? `No terceirizado como ${como}; tem: ` : 'No terceirizado o paciente tem: ') + tem.slice(0,4).join(', ') + (tem.length>4 ? '…' : '') };
+    } else {
+      problema = { key:'PACIENTE_NAO_ENCONTRADO_TERC', detalhe:'' };
+    }
+    porTipo[problema.key]++;
+    const ref = p.regs.find(e=>normTxt(e.laboratorio)===labP && e.convenio===cadConv) || p.regs[0] || null;
+    linhas.push({
+      lado:'principal',
+      paciente:r.paciente, data:r.data, quantidade:null, valor:null,
+      exameArquivo:r.exameArquivo || r.exame || '', exame:ref ? ref.descricao : (r.exame || r.exameArquivo || ''),
+      qtdPrincipal:r.quantidade,
+      valorCadastro:ref ? Number(ref.valorUnit) : null,
+      problemas:[problema],
+    });
+  });
+
   const paresNomes = [...pares.values()].sort((a,b)=>a.nomeTerc.localeCompare(b.nomeTerc, 'pt-BR'));
-  return { linhas, porTipo, total:T.length, semInconsistencia:T.length - linhas.length,
+  return { linhas, porTipo, total:T.length, totalPrincipal:P.length, semInconsistencia:T.length - linhasTerc,
+           lancadosPrincipal:(data.principalLancados||[]).length, lancadosTerc:(data.tercLancados||[]).length,
            contratoConferido, dataConferida, temDatas:datas.length>0, paresNomes };
 }
 function viewComparativo(){
@@ -6298,12 +6540,13 @@ function viewComparativo(){
       <div class="flexrow" style="align-items:flex-start;">
         <div>
           Selecione o laboratório <b>Principal (Público)</b> e importe o arquivo dele; depois selecione o laboratório
-          <b>Terceirizado</b> e importe o arquivo dele. Sempre com base no arquivo terceirizado, o sistema procura cada
-          exame no arquivo principal e confere com o <b>Cadastro de Exames</b>. O relatório mostra o <b>tipo</b> de cada
-          inconsistência — paciente ou exame não encontrado, nome do paciente ou descrição do exame diferentes,
-          exame em duplicidade, quantidade ou valor diferentes, exame não contratado com o laboratório, fora da
-          competência… — e permite filtrar por tipo. Esta conferência não é salva em Lançamentos —
-          reimportar um arquivo sempre SUBSTITUI o anterior daquele lado, nunca duplica.
+          <b>Terceirizado</b> e importe o arquivo dele. O sistema confere os dois arquivos nos dois sentidos (o que está
+          no terceirizado e falta no principal, e o que está no principal e falta no terceirizado) e com o
+          <b>Cadastro de Exames</b>. O relatório mostra o <b>tipo</b> de cada inconsistência e permite filtrar por tipo.
+          Nos filtros de paciente/exame não encontrado dá para <b>lançar</b>, paciente por paciente, os exames que
+          faltam no arquivo do outro laboratório; ao final, <b>“💾 Salvar arquivos corrigidos”</b> grava as cópias
+          corrigidas na pasta LANÇAMENTOS para importar em 3. Lançamentos → Lançar Exames. Esta conferência não grava
+          lançamentos — reimportar um arquivo sempre SUBSTITUI o anterior daquele lado, nunca duplica.
           Os arquivos (.xlsx, .csv, .docx, .txt ou .pdf) podem vir do jeito que o laboratório emite: títulos do
           relatório, cabeçalhos repetidos nas quebras de página, números de página, rodapés e totais são
           desconsiderados automaticamente — só as linhas de exames entram na comparação. O PDF precisa ser o
@@ -6312,6 +6555,7 @@ function viewComparativo(){
         ${(data.principalRows || data.tercRows) ? `<button class="btn ghost small edit-only" style="white-space:nowrap;" onclick="limparComparativoTab()">🗑 Limpar comparação desta aba</button>` : ''}
       </div>
     </div>
+    ${pastaTrabalhoHTML('comparativo')}
 
     <div class="grid cols-2">
       <div class="card">
@@ -6322,7 +6566,7 @@ function viewComparativo(){
           <option value="">Selecione…</option>${optsPrincipal}
         </select></div>
         <input type="file" id="cmpFilePrincipal" accept=".xlsx,.xls,.csv,.docx,.txt,.pdf" style="display:none" onchange="handleComparativoImport(event,'principal')">
-        <button class="btn edit-only" onclick="document.getElementById('cmpFilePrincipal').click()">📥 Importar arquivo</button>
+        <button class="btn edit-only" onclick="cmpAbrirImportacao('principal')">📥 Importar arquivo</button>
         ${data.principalRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.principalArquivo)}</b> — ${fmtNum(data.principalRows.length)} registro(s) — Laboratório: <b>${esc(data.principalLab)}</b> &nbsp;<button class="btn ghost small edit-only" style="padding:2px 6px;" onclick="resetComparativoLado('principal')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
         `}
       </div>
@@ -6334,7 +6578,7 @@ function viewComparativo(){
           <option value="">Selecione…</option>${optsTerc}
         </select></div>
         <input type="file" id="cmpFileTerc" accept=".xlsx,.xls,.csv,.docx,.txt,.pdf" style="display:none" onchange="handleComparativoImport(event,'terceirizado')">
-        <button class="btn edit-only" onclick="document.getElementById('cmpFileTerc').click()">📥 Importar arquivo</button>
+        <button class="btn edit-only" onclick="cmpAbrirImportacao('terceirizado')">📥 Importar arquivo</button>
         ${data.tercRows ? `<div class="muted" style="margin-top:10px;font-size:12px;">✅ <b>${esc(data.tercArquivo)}</b> — ${fmtNum(data.tercRows.length)} registro(s) — Laboratório: <b>${esc(data.tercLab)}</b> &nbsp;<button class="btn ghost small edit-only" style="padding:2px 6px;" onclick="resetComparativoLado('terceirizado')">🗑 Excluir/limpar este arquivo</button></div>` : ''}
         `}
       </div>
@@ -6415,19 +6659,240 @@ function cmpPainelNomes(data, pendentes, confirmados, modo){
     ${modo!=='confirmados' && confirmados.length ? `<div class="cmp-det" style="margin-top:8px;">${fmtNum(confirmados.length)} par(es) de nomes já confirmado(s) nesta conferência — <a href="#" onclick="setComparativoFiltro('NOMES_CONFIRMADOS');return false;">ver ou desfazer</a>.</div>` : ''}
   </div>`;
 }
+/* ---------------- Lançar na conferência e salvar os arquivos corrigidos ----------------
+   Nos filtros de exame/paciente não encontrado, cada paciente aparece com os exames que
+   faltam, e "Lançar" inclui esses exames na cópia corrigida do arquivo do laboratório que
+   não os tinha (principal ou terceirizado, conforme a inconsistência) — a inconsistência
+   some. "💾 Salvar arquivos corrigidos" grava as duas cópias (.xlsx) na pasta LANÇAMENTOS
+   (ou em Downloads), com o nome escolhido, prontas para 3. Lançamentos → Lançar Exames.
+   Nada disso grava lançamentos nem altera cadastros: tudo fica na conferência e nos arquivos. */
+const CMP_LANCAR = { PACIENTE_NAO_ENCONTRADO:'principal', EXAME_NAO_ENCONTRADO:'principal',
+                     PACIENTE_NAO_ENCONTRADO_TERC:'terceirizado', EXAME_NAO_ENCONTRADO_TERC:'terceirizado' };
+let cmpGruposTela = [];     // pacientes do quadro "Lançar" (os botões usam a posição na lista)
+let cmpLancadosTela = [];   // exames do quadro "Lançados na conferência"
+function cmpNomeLab(data, lado){ return lado==='principal' ? data.principalLab : data.tercLab; }
+function cmpRotuloLado(lado){ return lado==='principal' ? 'principal' : 'terceirizado'; }
+/* Exame do Cadastro do laboratório indicado (mesmo convênio desta aba) que corresponde ao nome */
+function cmpExameDoLab(textos, lab){
+  const cadConv = cadastroValueFor(comparativoTab);
+  const regs = cmpReconhecerExame(textos.filter(Boolean)).regs.filter(e=>normTxt(e.laboratorio)===normTxt(lab) && e.convenio===cadConv);
+  return regs.find(e=>e.tipo==='ATIVO') || regs[0] || null;
+}
+function cmpQtdLinha(l){ return Number(l.lado==='principal' ? l.qtdPrincipal : l.quantidade) || 1; }
+function cmpLancarGrupo(i){
+  if(semPermissao('comparativo')) return;
+  const g = cmpGruposTela[i];
+  if(!g) return;
+  const marcados = g.itens.filter((l,j)=>{ const cb = document.getElementById(`cmpL_${i}_${j}`); return !cb || cb.checked; });
+  if(!marcados.length){ showToast('Marque pelo menos um exame para lançar.'); return; }
+  const data = comparativoDataFor(comparativoTab);
+  const destino = g.destino, origem = destino==='principal' ? 'terceirizado' : 'principal';
+  const labDestino = cmpNomeLab(data, destino);
+  const lista = destino==='principal' ? (data.principalLancados = data.principalLancados || [])
+                                      : (data.tercLancados = data.tercLancados || []);
+  marcados.forEach(l=>{
+    const reg = cmpExameDoLab([l.exameArquivo, l.exame], labDestino);
+    const nome = reg ? reg.descricao : (l.exame || l.exameArquivo);
+    lista.push({
+      id:uid(), paciente:l.paciente, data:l.data, exame:nome, exameArquivo:nome, exameAlt:[],
+      quantidade:cmpQtdLinha(l), valor:reg ? Number(reg.valorUnit) : null,
+      lancado:{ em:new Date().toISOString(), por:usuarioLogadoNome(), de:origem, deLab:cmpNomeLab(data, origem), exameOrigem:l.exameArquivo || l.exame },
+    });
+  });
+  cmpMarcarLancamentos(data, true);
+  render();
+  showToast(`${marcados.length} exame(s) de ${g.paciente} lançado(s) no arquivo do laboratório ${cmpRotuloLado(destino)} (${labDestino}). Lembre de salvar os arquivos corrigidos.`, 'success');
+}
+function cmpDesfazerLancado(i){
+  if(semPermissao('comparativo')) return;
+  const it = cmpLancadosTela[i];
+  if(!it) return;
+  const data = comparativoDataFor(comparativoTab);
+  data.principalLancados = (data.principalLancados||[]).filter(x=>x.id!==it.id);
+  data.tercLancados = (data.tercLancados||[]).filter(x=>x.id!==it.id);
+  cmpMarcarLancamentos(data, true);
+  render();
+  showToast('Lançamento desfeito: o exame voltou a aparecer como inconsistência.');
+}
+function cmpPainelLancar(data, linhasTipo, tipo){
+  const destino = CMP_LANCAR[tipo], labDestino = cmpNomeLab(data, destino);
+  const grupos = [], idx = new Map();
+  linhasTipo.forEach(l=>{
+    const k = cmpNomePac(l.paciente);
+    if(!idx.has(k)){ idx.set(k, grupos.length); grupos.push({ paciente:l.paciente, destino, itens:[] }); }
+    grupos[idx.get(k)].itens.push(l);
+  });
+  cmpGruposTela = grupos;
+  return `<div class="cmp-nomes cmp-lancar">
+    <div class="cmp-nomes-titulo">➕ Lançar os exames que faltam no ${cmpRotuloLado(destino)} — ${fmtNum(grupos.length)} paciente(s)</div>
+    <div class="cmp-det" style="margin-bottom:8px;">Confira paciente por paciente (desmarque o exame que não deve entrar). Ao clicar em “Lançar”, os exames marcados entram no arquivo do <b>${esc(labDestino)}</b> e a inconsistência some. As correções ficam numa cópia do arquivo: depois use <b>“💾 Salvar arquivos corrigidos”</b> para gravá-la na pasta ${PASTA_LANCAMENTOS} e importe em <b>3. Lançamentos → Lançar Exames</b>.</div>
+    <div class="table-wrap" style="max-height:380px;"><table>
+      <thead><tr><th>Paciente</th><th>Exames que faltam no arquivo ${cmpRotuloLado(destino)}</th><th class="cmp-nomes-acao edit-only"></th></tr></thead>
+      <tbody>${grupos.map((g,i)=>`<tr>
+        <td style="vertical-align:top;"><b>${esc(g.paciente)}</b></td>
+        <td>${g.itens.map((l,j)=>`<label class="cmp-lancar-item"><input type="checkbox" id="cmpL_${i}_${j}" class="edit-only" checked>
+          <span>${esc(l.exame || l.exameArquivo)} <span class="cmp-det">${esc(l.data||'')}${cmpQtdLinha(l)>1 ? ' · qtd '+fmtNum(cmpQtdLinha(l)) : ''}</span></span></label>`).join('')}</td>
+        <td class="cmp-nomes-acao edit-only" style="vertical-align:top;white-space:nowrap;"><button class="btn small" onclick="cmpLancarGrupo(${i})">➕ Lançar no ${cmpRotuloLado(destino)}</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+function cmpPainelLancados(data){
+  const itens = (data.principalLancados||[]).map(x=>({ ...x, destino:'principal' }))
+    .concat((data.tercLancados||[]).map(x=>({ ...x, destino:'terceirizado' })));
+  cmpLancadosTela = itens;
+  return `<div class="cmp-nomes cmp-lancados">
+    <div class="cmp-nomes-titulo">➕ Exames lançados na conferência — ${fmtNum(itens.length)}</div>
+    <div class="cmp-det" style="margin-bottom:8px;">${data.alteracoesNaoSalvas
+      ? '⚠️ <b>Ainda não salvos em arquivo</b> — clique em “💾 Salvar arquivos corrigidos”.'
+      : 'Já incluídos nos arquivos corrigidos salvos.'} Para tirar algum, clique em “Desfazer”: ele volta a aparecer como inconsistência.</div>
+    <div class="table-wrap" style="max-height:380px;"><table>
+      <thead><tr><th>Paciente</th><th>Exame</th><th>Data</th><th class="right">Qtd</th><th>Lançado no arquivo</th><th>Por / em</th><th class="cmp-nomes-acao edit-only"></th></tr></thead>
+      <tbody>${itens.map((x,i)=>`<tr>
+        <td>${esc(x.paciente)}</td>
+        <td><b>${esc(x.exameArquivo || x.exame)}</b>${cmpChave(x.lancado.exameOrigem)!==cmpChave(x.exameArquivo) ? `<div class="cmp-det">no arquivo ${cmpRotuloLado(x.lancado.de)}: ${esc(x.lancado.exameOrigem)}</div>` : ''}</td>
+        <td style="white-space:nowrap;">${esc(x.data)||'—'}</td>
+        <td class="right">${fmtNum(x.quantidade)}</td>
+        <td>${x.destino==='principal' ? 'Principal' : 'Terceirizado'} — ${esc(cmpNomeLab(data, x.destino))}</td>
+        <td class="cmp-det">${esc(x.lancado.por||'—')}<br>${esc(new Date(x.lancado.em).toLocaleString('pt-BR', {dateStyle:'short', timeStyle:'short'}))}</td>
+        <td class="cmp-nomes-acao edit-only"><button class="btn ghost small" onclick="cmpDesfazerLancado(${i})">↩ Desfazer</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+/* Cópia corrigida do arquivo de um laboratório: os registros lidos do arquivo (já sem
+   títulos, cabeçalhos e totais) + os exames lançados na conferência. O exame vai com a
+   descrição do Cadastro de Exames daquele laboratório quando houver (para Lançar Exames
+   reconhecer de primeira); o nome original fica na coluna Observação. */
+function cmpArquivoCorrigido(data, lado){
+  const lab = cmpNomeLab(data, lado);
+  const base = (lado==='principal' ? data.principalRows : data.tercRows) || [];
+  const extras = (lado==='principal' ? data.principalLancados : data.tercLancados) || [];
+  const linhas = base.map(r=>{
+    const orig = r.exameArquivo || r.exame || '';
+    const reg = cmpExameDoLab([orig, ...(r.exameAlt||[])], lab);
+    const exame = reg ? reg.descricao : orig;
+    return [r.paciente || '', r.data || '', exame, lab, Number(r.quantidade) || 1, r.valor ?? '',
+            cmpChave(exame)!==cmpChave(orig) ? `No arquivo original: ${orig}` : ''];
+  });
+  extras.forEach(r=>{
+    const quando = new Date(r.lancado.em).toLocaleString('pt-BR', {dateStyle:'short', timeStyle:'short'});
+    linhas.push([r.paciente || '', r.data || '', r.exameArquivo || r.exame, lab, Number(r.quantidade) || 1, r.valor ?? '',
+      `Lançado na conferência em ${quando} por ${r.lancado.por} — constava no arquivo do ${r.lancado.deLab}`
+        + (cmpChave(r.lancado.exameOrigem)!==cmpChave(r.exameArquivo) ? ` como ${r.lancado.exameOrigem}` : '')]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet([['Paciente','Data','Exame','Laboratório','Quantidade','Valor Unitário','Observação'], ...linhas]);
+  ws['!cols'] = [{wch:40},{wch:17},{wch:44},{wch:26},{wch:11},{wch:14},{wch:80}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Exames');
+  return new Blob([XLSX.write(wb, { bookType:'xlsx', type:'array' })],
+                  { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+function cmpNomeCorrigido(nomeOriginal, lado){
+  const base = String(nomeOriginal||'').replace(/\.(xlsx|xls|csv|docx|txt|pdf)$/i,'').trim() || (lado==='principal' ? 'PRINCIPAL' : 'TERCEIRIZADO');
+  return /corrigido$/i.test(base) ? `${base}.xlsx` : `${base} - CORRIGIDO.xlsx`;   // já era um arquivo corrigido
+}
+function cmpLimparNomeArquivo(v){
+  let s = String(v||'').replace(/[<>:"/\\|?*\u0000-\u001f]/g,' ').replace(/\s+/g,' ').trim();
+  if(!s) return '';
+  if(!/\.xlsx$/i.test(s)) s += '.xlsx';
+  return s;
+}
+function cmpSalvarAbrir(){
+  if(semPermissao('comparativo')) return;
+  const data = comparativoDataFor(comparativoTab);
+  if(!data.principalRows || !data.tercRows){ showToast('Importe os dois arquivos antes de salvar.'); return; }
+  const onde = pastaTrabalho
+    ? `Os arquivos serão gravados na pasta <b>${PASTA_LANCAMENTOS}</b> (dentro de “${esc(pastaTrabalho.raiz.name)}”).`
+    : pastaSuportada()
+      ? `Nenhuma pasta de trabalho escolhida: os arquivos irão para <b>Downloads</b>. Para gravar direto na pasta ${PASTA_LANCAMENTOS}, escolha a pasta de trabalho no alto da tela.`
+      : 'Os arquivos irão para a pasta <b>Downloads</b> (este navegador não permite gravar em outra pasta).';
+  document.getElementById('cmpSalvarTexto').innerHTML = `${onde} Cada arquivo traz os exames do laboratório (sem títulos, cabeçalhos e totais) mais os exames lançados na conferência. Depois é só importá-los em <b>3. Lançamentos → Lançar Exames</b>.`;
+  const campo = lado=>{
+    const arq = lado==='principal' ? data.principalArquivo : data.tercArquivo;
+    const n = (lado==='principal' ? data.principalRows : data.tercRows).length;
+    const l = ((lado==='principal' ? data.principalLancados : data.tercLancados) || []).length;
+    return `<div class="cmpsalvar-item">
+      <label><input type="checkbox" id="cmpSalvar_${lado}" checked> <b>Laboratório ${cmpRotuloLado(lado)}</b> — ${esc(cmpNomeLab(data, lado))}</label>
+      <div class="cmp-det">${fmtNum(n)} registro(s) de “${esc(arq)}”${l ? ` + <b>${fmtNum(l)} lançado(s) na conferência</b>` : ' (nenhum exame lançado na conferência)'}</div>
+      <input id="cmpSalvarNome_${lado}" value="${esc(cmpNomeCorrigido(arq, lado))}" aria-label="Nome do arquivo corrigido do laboratório ${cmpRotuloLado(lado)}">
+    </div>`;
+  };
+  document.getElementById('cmpSalvarCampos').innerHTML = campo('principal') + campo('terceirizado');
+  document.getElementById('cmpSalvarDialog').classList.add('open');
+  setTimeout(()=>document.getElementById('cmpSalvarNome_principal')?.focus(), 0);
+}
+function cmpSalvarFechar(){ document.getElementById('cmpSalvarDialog')?.classList.remove('open'); }
+async function cmpSalvarConfirmar(){
+  const data = comparativoDataFor(comparativoTab);
+  const itens = ['principal','terceirizado']
+    .map(lado=>({ lado, marcado:document.getElementById('cmpSalvar_'+lado)?.checked, nome:cmpLimparNomeArquivo(document.getElementById('cmpSalvarNome_'+lado)?.value) }))
+    .filter(i=>i.marcado);
+  if(!itens.length){ showToast('Marque pelo menos um arquivo para salvar.'); return; }
+  if(itens.some(i=>!i.nome)){ showToast('Informe o nome de cada arquivo.'); return; }
+  if(itens.length===2 && itens[0].nome.toLowerCase()===itens[1].nome.toLowerCase()){ showToast('Os dois arquivos precisam ter nomes diferentes.'); return; }
+  // a autorização para gravar na pasta é pedida logo no clique (exigência do navegador)
+  let dir = null;
+  if(pastaTrabalho && pastaTrabalho.lancamentos){
+    if(await pastaPermitir(pastaTrabalho.lancamentos)) dir = pastaTrabalho.lancamentos;
+    else { showToast(`Sem autorização para gravar na pasta ${PASTA_LANCAMENTOS}: os arquivos irão para Downloads.`, 'warning'); }
+  }
+  const salvos = [];
+  try{
+    for(const i of itens){
+      const blob = cmpArquivoCorrigido(data, i.lado);
+      if(dir){
+        let existe = false;
+        try{ await dir.getFileHandle(i.nome); existe = true; }catch(e){}
+        if(existe && !confirm(`Já existe “${i.nome}” na pasta ${PASTA_LANCAMENTOS}. Substituir?`)) continue;
+        const fh = await dir.getFileHandle(i.nome, { create:true });
+        const w = await fh.createWritable();
+        await w.write(blob);
+        await w.close();
+      } else {
+        baixarArquivo(blob, i.nome);
+      }
+      salvos.push(i.nome);
+    }
+  }catch(e){
+    console.error(e);
+    showToast('Erro ao salvar o arquivo: '+e.message, 'error');
+    return;
+  }
+  if(!salvos.length) return;
+  data.jaSalvou = true;
+  if(itens.length===2 && salvos.length===2) data.alteracoesNaoSalvas = false;
+  cmpSalvarFechar();
+  render();
+  showToast((dir ? `Salvo(s) na pasta ${PASTA_LANCAMENTOS}: ` : 'Baixado(s) para Downloads: ') + salvos.join(' e ')
+    + '. Agora importe em 3. Lançamentos → Lançar Exames.', 'success');
+}
+document.addEventListener('keydown', ev=>{
+  if(ev.key==='Escape' && document.getElementById('cmpSalvarDialog')?.classList.contains('open')) cmpSalvarFechar();
+});
+window.addEventListener('beforeunload', ev=>{
+  if(Object.values(comparativoState).some(d=>d && d.alteracoesNaoSalvas)){ ev.preventDefault(); ev.returnValue = ''; }
+});
 function renderComparativoReport(data, conf){
   const tiposComOcorrencia = CMP_TIPOS.filter(t=>conf.porTipo[t.key]>0);
   const pares = conf.paresNomes || [];
   const paresPendentes = pares.filter(p=>!p.confirmado), paresConfirmados = pares.filter(p=>p.confirmado);
+  const totalLancados = (conf.lancadosPrincipal||0) + (conf.lancadosTerc||0);
   let filtro = comparativoFiltro[comparativoTab] || 'TODOS';
   // conferiu o último nome da lista: passa a mostrar os confirmados (onde dá para desfazer)
   if(filtro==='PACIENTE_NOME_DIFERENTE' && !paresPendentes.length && paresConfirmados.length) filtro = 'NOMES_CONFIRMADOS';
   // desfez a última confirmação: volta para a lista de nomes a conferir
   if(filtro==='NOMES_CONFIRMADOS' && !paresConfirmados.length && paresPendentes.length) filtro = 'PACIENTE_NOME_DIFERENTE';
-  if(filtro!=='TODOS' && !tiposComOcorrencia.some(t=>t.key===filtro) && !(filtro==='NOMES_CONFIRMADOS' && paresConfirmados.length)) filtro = 'TODOS';
+  // lançou o último paciente da lista: passa a mostrar os lançados (onde dá para desfazer)
+  if(CMP_LANCAR[filtro] && !conf.porTipo[filtro] && totalLancados) filtro = 'LANCADOS';
+  const filtroValido = filtro==='TODOS' || tiposComOcorrencia.some(t=>t.key===filtro)
+    || (filtro==='NOMES_CONFIRMADOS' && paresConfirmados.length) || (filtro==='LANCADOS' && totalLancados);
+  if(!filtroValido) filtro = 'TODOS';
   comparativoFiltro[comparativoTab] = filtro;   // a troca automática vale para as próximas telas
+  const soPainel = filtro==='NOMES_CONFIRMADOS' || filtro==='LANCADOS';
   const linhas = filtro==='TODOS' ? conf.linhas : conf.linhas.filter(l=>l.problemas.some(p=>p.key===filtro));
-  const rotuloFiltro = filtro==='NOMES_CONFIRMADOS' ? 'Nomes confirmados como o mesmo paciente' : cmpTipo(filtro).rotulo;
+  const rotuloFiltro = filtro==='NOMES_CONFIRMADOS' ? 'Nomes confirmados como o mesmo paciente'
+    : filtro==='LANCADOS' ? 'Exames lançados na conferência' : cmpTipo(filtro).rotulo;
   const badge = (key, detalhe)=>{
     const t = cmpTipo(key);
     return `<div><span class="badge cmp-${t.cor}" title="${esc(t.texto)}">${esc(t.rotulo)}</span>${detalhe ? `<div class="cmp-det">${esc(detalhe)}</div>` : ''}</div>`;
@@ -6453,26 +6918,33 @@ function renderComparativoReport(data, conf){
           <h2 style="margin:0;">Relatório de inconsistências</h2>
           <div class="subtitle" style="margin-bottom:0;">${esc(convenioLabel(comparativoTab))} — Principal: <b>${esc(data.principalLab)}</b> &nbsp;vs&nbsp; Terceirizado: <b>${esc(data.tercLab)}</b></div>
         </div>
-        <button class="btn secondary small print-btn" onclick="printReport('printComparativo')">🖨️ Imprimir</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn small edit-only ${data.alteracoesNaoSalvas ? '' : 'secondary'}" onclick="cmpSalvarAbrir()" title="Grava a cópia corrigida dos dois arquivos (com os exames lançados na conferência) para importar em Lançar Exames">💾 Salvar arquivos corrigidos${data.alteracoesNaoSalvas && totalLancados ? ` (${fmtNum(totalLancados)})` : ''}</button>
+          <button class="btn secondary small print-btn" onclick="printReport('printComparativo')">🖨️ Imprimir</button>
+        </div>
       </div>
+      ${data.alteracoesNaoSalvas ? `<div class="helpbox edit-only" style="background:var(--amber-soft);border-color:#F1D3AE;color:#8a5a1c;margin-top:10px;">⚠️ Há ${totalLancados ? `<b>${fmtNum(totalLancados)} exame(s) lançado(s)</b> na conferência` : 'alterações nos lançamentos da conferência'} ainda não salvos em arquivo. Clique em <b>“💾 Salvar arquivos corrigidos”</b> para gravar e depois importe em 3. Lançamentos → Lançar Exames.</div>` : ''}
       <div id="printComparativo">
         ${reportHeaderHTML({convenio:convenioLabel(comparativoTab), laboratorio:`${data.principalLab} (principal) vs ${data.tercLab} (terceirizado)`, vigencia:'—', competenciaText:competenciaLabel(STATE.competencia.mes, STATE.competencia.ano)})}
         <div class="grid cols-3" style="margin-bottom:12px;">
-          <div class="stat"><div class="label">Registros no arquivo terceirizado</div><div class="value">${fmtNum(conf.total)}</div></div>
-          <div class="stat"><div class="label">Sem inconsistência</div><div class="value" style="color:var(--green);font-size:20px;">${fmtNum(conf.semInconsistencia)}</div></div>
-          <div class="stat"><div class="label">Com inconsistência</div><div class="value" style="color:var(--red);font-size:20px;">${fmtNum(conf.linhas.length)}</div><div class="hint">Um registro pode ter mais de um tipo de inconsistência.</div></div>
+          <div class="stat"><div class="label">Registros no arquivo terceirizado</div><div class="value">${fmtNum(conf.total)}</div><div class="hint">${conf.lancadosTerc ? `Inclui ${fmtNum(conf.lancadosTerc)} lançado(s) na conferência. ` : ''}Principal: ${fmtNum(conf.totalPrincipal)} registro(s)${conf.lancadosPrincipal ? `, incluindo ${fmtNum(conf.lancadosPrincipal)} lançado(s) na conferência` : ''}.</div></div>
+          <div class="stat"><div class="label">Sem inconsistência</div><div class="value" style="color:var(--green);font-size:20px;">${fmtNum(conf.semInconsistencia)}</div><div class="hint">Registros do terceirizado que conferem com o principal.</div></div>
+          <div class="stat"><div class="label">Com inconsistência</div><div class="value" style="color:var(--red);font-size:20px;">${fmtNum(conf.linhas.length)}</div><div class="hint">Nos dois sentidos. Um registro pode ter mais de um tipo de inconsistência.</div></div>
         </div>
-        ${(tiposComOcorrencia.length || paresConfirmados.length) ? `
+        ${(tiposComOcorrencia.length || paresConfirmados.length || totalLancados) ? `
         <div class="cmp-filtros" role="group" aria-label="Filtrar por tipo de inconsistência">
           <button type="button" class="cmp-filtro ${filtro==='TODOS'?'ativo':''}" onclick="setComparativoFiltro('TODOS')">Todas <span class="n">${fmtNum(conf.linhas.length)}</span></button>
           ${tiposComOcorrencia.map(t=>`<button type="button" class="cmp-filtro cmp-${t.cor} ${filtro===t.key?'ativo':''}" title="${esc(t.texto)}" onclick="setComparativoFiltro('${t.key}')">${esc(t.rotulo)} <span class="n">${fmtNum(conf.porTipo[t.key])}</span></button>`).join('')}
           ${paresConfirmados.length ? `<button type="button" class="cmp-filtro cmp-ok ${filtro==='NOMES_CONFIRMADOS'?'ativo':''}" title="Nomes de paciente confirmados como a mesma pessoa — não contam como inconsistência" onclick="setComparativoFiltro('NOMES_CONFIRMADOS')">✔ Nomes confirmados <span class="n">${fmtNum(paresConfirmados.length)}</span></button>` : ''}
+          ${totalLancados ? `<button type="button" class="cmp-filtro cmp-ok ${filtro==='LANCADOS'?'ativo':''}" title="Exames incluídos na cópia corrigida dos arquivos — não contam como inconsistência" onclick="setComparativoFiltro('LANCADOS')">➕ Lançados na conferência <span class="n">${fmtNum(totalLancados)}</span></button>` : ''}
         </div>
-        ${filtro!=='TODOS' ? `<div class="cmp-det" style="margin:-4px 0 10px;">Mostrando só: <b>${esc(rotuloFiltro)}</b>${filtro==='NOMES_CONFIRMADOS' ? '' : ` (${fmtNum(linhas.length)} registro(s))`}.</div>` : ''}` : ''}
+        ${filtro!=='TODOS' ? `<div class="cmp-det" style="margin:-4px 0 10px;">Mostrando só: <b>${esc(rotuloFiltro)}</b>${soPainel ? '' : ` (${fmtNum(linhas.length)} registro(s))`}.</div>` : ''}` : ''}
         ${avisos.map(a=>`<div class="helpbox" style="background:var(--amber-soft);border-color:#F1D3AE;color:#8a5a1c;">${a}</div>`).join('')}
         ${filtro==='PACIENTE_NOME_DIFERENTE' && paresPendentes.length ? cmpPainelNomes(data, paresPendentes, paresConfirmados, 'pendentes') : ''}
         ${filtro==='NOMES_CONFIRMADOS' ? cmpPainelNomes(data, paresPendentes, paresConfirmados, 'confirmados') : ''}
-        ${filtro==='NOMES_CONFIRMADOS' ? '' : conf.linhas.length===0 ? `<div class="helpbox">Nenhuma inconsistência encontrada — todos os ${fmtNum(conf.total)} registro(s) do arquivo terceirizado foram localizados no arquivo principal, com a mesma quantidade${conf.contratoConferido ? ', e conferem com o Cadastro de Exames' : ''}.</div>` : `
+        ${CMP_LANCAR[filtro] && linhas.length ? cmpPainelLancar(data, linhas, filtro) : ''}
+        ${filtro==='LANCADOS' ? cmpPainelLancados(data) : ''}
+        ${soPainel ? '' : conf.linhas.length===0 ? `<div class="helpbox">Nenhuma inconsistência encontrada — todos os ${fmtNum(conf.total)} registro(s) do arquivo terceirizado foram localizados no arquivo principal (e vice-versa), com a mesma quantidade${conf.contratoConferido ? ', e conferem com o Cadastro de Exames' : ''}.</div>` : `
         <div class="table-wrap"><table>
           <thead><tr><th>Paciente</th><th>Data</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd (Terceirizado)</th><th class="right">Qtd (Principal)</th><th>Situação</th></tr></thead>
           <tbody>
@@ -6480,12 +6952,12 @@ function renderComparativoReport(data, conf){
               const valorArquivo = l.valor!=null && (l.valorCadastro==null || Math.abs(l.valor-l.valorCadastro)>0.005)
                 ? `<div class="cmp-det">arquivo: ${fmtMoney(l.valor)}</div>` : '';
               return `<tr>
-              <td>${esc(l.paciente)||'—'}</td>
+              <td>${esc(l.paciente)||'—'}${l.lado==='principal' ? '<div class="cmp-det">do arquivo principal</div>' : ''}</td>
               <td style="white-space:nowrap;">${esc(l.data)||'—'}</td>
               <td class="right">${l.valorCadastro==null ? '—' : fmtMoney(l.valorCadastro)}${valorArquivo}</td>
               <td>${l.exame ? exameCellHTML(null, l.exame) : '—'}${nomeNoArquivo(l)}</td>
-              <td class="right">${fmtNum(l.quantidade)}</td>
-              <td class="right">${l.qtdPrincipal===null ? '—' : fmtNum(l.qtdPrincipal)}</td>
+              <td class="right">${l.quantidade==null ? '—' : fmtNum(l.quantidade)}</td>
+              <td class="right">${l.qtdPrincipal==null ? '—' : fmtNum(l.qtdPrincipal)}</td>
               <td><div class="cmp-badges">${l.problemas.map(p=>badge(p.key, p.detalhe)).join('')}</div></td>
             </tr>`;}).join('')}
           </tbody>
@@ -7138,6 +7610,8 @@ document.addEventListener('keydown', function(e){
    LOADING SCREEN MELHORADO
    ============================================================ */
 (function init(){
+  /* Pasta de trabalho (CONFERÊNCIA/LANÇAMENTOS) escolhida antes neste computador */
+  pastaIniciar();
   /* Versão exibida no rodapé da tela de acesso */
   const lv = document.getElementById('loginVersao');
   if(lv) lv.textContent = 'Versão ' + appVersao();
