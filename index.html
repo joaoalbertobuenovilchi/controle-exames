@@ -204,6 +204,13 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 .cmp-filtro.cmp-conferir{background:#E1EEFB;color:#28588F;border-color:transparent;}
 .cmp-filtro.cmp-cadastro{background:#EAE6F8;color:#5B3FA3;border-color:transparent;}
 .cmp-filtro.ativo{box-shadow:0 0 0 2px var(--teal-dark);}
+.cmp-filtro.cmp-ok{background:var(--green-soft);color:var(--green);border-color:transparent;}
+/* Conferência dos nomes de paciente (filtro "Nome do paciente diferente") */
+.cmp-nomes{border:1px solid #CFE0F3;background:#F4F9FE;border-radius:10px;padding:12px 14px;margin-bottom:12px;}
+.cmp-nomes-titulo{font-weight:800;color:#28588F;font-size:13px;margin-bottom:3px;}
+.cmp-nomes table{background:#fff;}
+mark.cmp-dif{background:#FFE7A8;color:inherit;padding:0 2px;border-radius:3px;}
+@media print{ .cmp-nomes-acao{ display:none !important; } }
 .cmp-legenda{margin-top:12px;font-size:12px;color:var(--ink-soft);}
 .cmp-legenda summary{cursor:pointer;font-weight:700;color:var(--teal-dark);}
 .cmp-legenda-lista{display:flex;flex-direction:column;gap:7px;margin-top:10px;}
@@ -959,9 +966,12 @@ function trocarCodigoAcesso(){
      4.29.2026  08/10/2026      Cadastros → Exames: aviso "Exame já cadastrado para este
                                 laboratório e tipo de convênio/processo" ao digitar e ao salvar
                                 (abrir o existente, cancelar ou cadastrar mesmo assim)
+     4.30.2026  08/10/2026      Comparativo: no filtro "Nome do paciente diferente", conferência
+                                nome por nome — "Manter nome" retira a inconsistência (fica gravado
+                                para as próximas conferências) e "Nomes confirmados" permite desfazer
    ============================================================ */
 const APP_CRIACAO = { mes: 7, ano: 2026 };   // julho/2026 = mês 1
-const APP_ALTERACAO = 29;                     // nº acumulado de alterações publicadas
+const APP_ALTERACAO = 30;                     // nº acumulado de alterações publicadas
 const APP_DATA = '2026-10-08';                // data desta versão (AAAA-MM-DD)
 function appVersao(){
   const p = APP_DATA.split('-').map(Number);
@@ -1014,6 +1024,7 @@ let STATE = {
   glosaPlanoAcao: [],         // plano de ação: CURTO / MEDIO / LONGO prazo
   glosaConfig: {},            // por competência: { 'JULHO/2026': {dataFaturamento, prazoDias, status} }
   glosaRelatorios: [],        // relatórios de glosas salvos/numerados (ex.: 001.08.2026) p/ acompanhamento
+  pacientesNomesConfirmados: [], // Comparativo: pares de nomes confirmados pelo usuário como o mesmo paciente
 };
 
 let currentView = "dashboard";
@@ -1086,6 +1097,10 @@ function garantirModulosNovos(){
   /* Relatórios de glosas salvos (numerados). Criado depois — só nasce vazio quando ainda
      não existe; relatórios já salvos jamais são tocados. */
   if(!Array.isArray(STATE.glosaRelatorios)) STATE.glosaRelatorios = [];
+  /* Comparativo entre Laboratórios: nomes de paciente que o usuário confirmou como a mesma
+     pessoa (ex.: "SANDRA REGINA MOSCHIM" × "SANDRA REGINA MOSCHIN"). Nasce vazio; nada mais
+     é alterado. */
+  if(!Array.isArray(STATE.pacientesNomesConfirmados)) STATE.pacientesNomesConfirmados = [];
   STATE.glosaRelatorios.forEach(r=>{
     if(!Array.isArray(r.historicoStatus)) r.historicoStatus = [];
     if(r.status===undefined) r.status = 'Em preenchimento';
@@ -6042,6 +6057,8 @@ function cmpOrdem(key){ const i = CMP_TIPOS.findIndex(t=>t.key===key); return i<
 function cmpChave(s){ return normTxt(s).replace(/[^A-Z0-9]/g,''); }
 /* Nome de paciente para comparação: só letras, sem acento */
 function cmpNomePac(s){ return normTxt(s).replace(/[^A-Z ]/g,' ').replace(/\s+/g,' ').trim(); }
+/* Identifica um par de nomes confirmado como a mesma pessoa (a ordem dos nomes não importa) */
+function cmpChaveNomes(a, b){ return [cmpNomePac(a), cmpNomePac(b)].sort().join('|'); }
 function cmpLev(a, b){
   if(a===b) return 0;
   if(!a.length) return b.length;
@@ -6123,7 +6140,8 @@ function computeComparativoInconsistencias(data){
   if(!data.principalRows || !data.tercRows) return null;
   const cadConv = cadastroValueFor(comparativoTab);
   const assinatura = [comparativoTab, cadConv, data.tercLab, STATE.competencia.mes, STATE.competencia.ano,
-    STATE.exames.map(e=>[e.id, e.descricao, (e.apelidos||[]).join('/'), e.laboratorio, e.convenio, e.tipo, e.valorUnit].join('~')).join('|')].join('#');
+    STATE.exames.map(e=>[e.id, e.descricao, (e.apelidos||[]).join('/'), e.laboratorio, e.convenio, e.tipo, e.valorUnit].join('~')).join('|'),
+    (STATE.pacientesNomesConfirmados||[]).map(c=>c.chave).join('|')].join('#');
   const c = data._conferencia;
   if(c && c.p===data.principalRows && c.t===data.tercRows && c.assinatura===assinatura) return c.res;
   const res = cmpConferir(data, cadConv);
@@ -6200,6 +6218,10 @@ function cmpConferir(data, cadConv){
   const lab = normTxt(data.tercLab);
   const contratoConferido = STATE.exames.some(e=>normTxt(e.laboratorio)===lab && e.convenio===cadConv);
 
+  // Nomes de paciente que o usuário já confirmou como a mesma pessoa: a inconsistência
+  // "Nome do paciente diferente" deixa de aparecer para esses pares
+  const confirmados = new Set((STATE.pacientesNomesConfirmados||[]).map(c=>c.chave));
+  const pares = new Map();   // cada par de nomes uma vez só, com quantos registros ele afeta
   const linhas = [], porTipo = {};
   CMP_TIPOS.forEach(t=>{ porTipo[t.key] = 0; });
   T.forEach(t=>{
@@ -6213,7 +6235,13 @@ function cmpConferir(data, cadConv){
       }
       else add('PACIENTE_NAO_ENCONTRADO', t.nomeParecido ? `Nome parecido no principal: ${t.nomeParecido} (sem este exame)` : '');
     } else {
-      if(t.nomeDiferente) add('PACIENTE_NOME_DIFERENTE', `No principal: ${t.nomeDiferente}`);
+      if(t.nomeDiferente){
+        const chave = cmpChaveNomes(r.paciente, t.nomeDiferente);
+        const confirmado = confirmados.has(chave);
+        if(!pares.has(chave)) pares.set(chave, { chave, nomeTerc:r.paciente, nomePrinc:t.nomeDiferente, registros:0, confirmado });
+        pares.get(chave).registros++;
+        if(!confirmado) add('PACIENTE_NOME_DIFERENTE', `No principal: ${t.nomeDiferente}`);
+      }
       if(t.descricaoDiferente) add('EXAME_DESCRICAO_DIFERENTE', `No principal: ${t.par.r.exameArquivo || t.par.r.exame}`);
       if(Number(t.par.r.quantidade)!==Number(r.quantidade)) add('QTD_DIVERGENTE', `Terceirizado ${fmtNum(r.quantidade)} × principal ${fmtNum(t.par.r.quantidade)}`);
     }
@@ -6249,8 +6277,9 @@ function cmpConferir(data, cadConv){
       problemas,
     });
   });
+  const paresNomes = [...pares.values()].sort((a,b)=>a.nomeTerc.localeCompare(b.nomeTerc, 'pt-BR'));
   return { linhas, porTipo, total:T.length, semInconsistencia:T.length - linhas.length,
-           contratoConferido, dataConferida, temDatas:datas.length>0 };
+           contratoConferido, dataConferida, temDatas:datas.length>0, paresNomes };
 }
 function viewComparativo(){
   if(!STATE.tiposConvenio.find(t=>t.key===comparativoTab)) comparativoTab = STATE.tiposConvenio[0]?.key;
@@ -6318,11 +6347,87 @@ function viewComparativo(){
    Só muda o que aparece na tela/impressão — não altera a conferência. */
 let comparativoFiltro = {};
 function setComparativoFiltro(f){ comparativoFiltro[comparativoTab] = f; render(); }
+
+/* ---------------- Conferência dos nomes de paciente ----------------
+   No filtro "Nome do paciente diferente", cada par de nomes aparece uma vez (com quantos
+   registros afeta) e o usuário decide, nome por nome: "Manter nome — é o mesmo paciente"
+   tira a inconsistência do relatório; o que não for confirmado continua como inconsistência.
+   As confirmações ficam gravadas (STATE.pacientesNomesConfirmados) para valer também ao
+   reimportar os arquivos e nas próximas conferências, e podem ser desfeitas em
+   "✔ Nomes confirmados". Nenhum lançamento, exame ou outro cadastro é alterado. */
+let cmpParesTela = [];   // pares mostrados no quadro; os botões usam a posição na lista
+function confirmarNomePaciente(i){
+  if(semPermissao('comparativo')) return;
+  const p = cmpParesTela[i];
+  if(!p) return;
+  if(!Array.isArray(STATE.pacientesNomesConfirmados)) STATE.pacientesNomesConfirmados = [];
+  if(!STATE.pacientesNomesConfirmados.some(c=>c.chave===p.chave)){
+    STATE.pacientesNomesConfirmados.push({ chave:p.chave, nomeTerceirizado:p.nomeTerc, nomePrincipal:p.nomePrinc,
+      confirmadoPor:usuarioLogadoNome(), confirmadoEm:new Date().toISOString() });
+  }
+  saveState(); render();
+  showToast(`Nome mantido: “${p.nomeTerc}” e “${p.nomePrinc}” são o mesmo paciente — a inconsistência saiu do relatório.`, 'success');
+}
+function desfazerNomePaciente(i){
+  if(semPermissao('comparativo')) return;
+  const p = cmpParesTela[i];
+  if(!p) return;
+  if(!confirm(`Desfazer a confirmação?\n\n“${p.nomeTerc}” × “${p.nomePrinc}” volta a aparecer como “Nome do paciente diferente”.`)) return;
+  STATE.pacientesNomesConfirmados = (STATE.pacientesNomesConfirmados||[]).filter(c=>c.chave!==p.chave);
+  saveState(); render();
+  showToast('Confirmação desfeita: o nome voltou a aparecer como inconsistência.');
+}
+/* Nome com as palavras que não existem no outro nome destacadas */
+function cmpNomeMarcado(nome, outro){
+  const doOutro = new Set(cmpNomePac(outro).split(' '));
+  return String(nome||'').split(/\s+/).map(p=>{
+    const n = cmpNomePac(p);
+    return n && !doOutro.has(n) ? `<mark class="cmp-dif">${esc(p)}</mark>` : esc(p);
+  }).join(' ');
+}
+function cmpPainelNomes(data, pendentes, confirmados, modo){
+  cmpParesTela = modo==='confirmados' ? confirmados : pendentes;
+  const reg = n => `${fmtNum(n)} registro${n===1?'':'s'}`;
+  const linha = (p, i)=>{
+    const info = modo==='confirmados' ? (STATE.pacientesNomesConfirmados||[]).find(c=>c.chave===p.chave) : null;
+    const quando = info && info.confirmadoEm ? new Date(info.confirmadoEm).toLocaleString('pt-BR', {dateStyle:'short', timeStyle:'short'}) : '';
+    return `<tr>
+      <td>${cmpNomeMarcado(p.nomeTerc, p.nomePrinc)}</td>
+      <td>${cmpNomeMarcado(p.nomePrinc, p.nomeTerc)}</td>
+      <td class="right" style="white-space:nowrap;">${reg(p.registros)}</td>
+      <td class="cmp-nomes-acao edit-only" style="white-space:nowrap;">${modo==='confirmados'
+        ? `${info ? `<span class="cmp-det" style="margin-right:8px;">por ${esc(info.confirmadoPor||'—')}${quando ? ' em '+esc(quando) : ''}</span>` : ''}<button class="btn ghost small" onclick="desfazerNomePaciente(${i})">↩ Desfazer</button>`
+        : `<button class="btn small" onclick="confirmarNomePaciente(${i})" title="Confirma que os dois nomes são do mesmo paciente: esta inconsistência sai do relatório">✔ Manter nome — é o mesmo paciente</button>`}</td>
+    </tr>`;
+  };
+  const lista = modo==='confirmados' ? confirmados : pendentes;
+  return `<div class="cmp-nomes">
+    <div class="cmp-nomes-titulo">${modo==='confirmados'
+      ? `✔ Nomes confirmados como o mesmo paciente — ${fmtNum(lista.length)} par(es)`
+      : `Conferência dos nomes — ${fmtNum(lista.length)} par(es) de nomes para conferir`}</div>
+    <div class="cmp-det" style="margin-bottom:8px;">${modo==='confirmados'
+      ? 'Estes nomes foram confirmados como o mesmo paciente e por isso não aparecem como inconsistência (nesta e nas próximas conferências). Para voltar a tratar algum como inconsistência, clique em “Desfazer”.'
+      : 'Confira nome por nome (as palavras diferentes estão destacadas). Se for o mesmo paciente, clique em “Manter nome”: a inconsistência sai do relatório e não volta nas próximas conferências. O que não for confirmado continua como inconsistência.'}</div>
+    <div class="table-wrap" style="max-height:340px;"><table>
+      <thead><tr><th>Nome no terceirizado (${esc(data.tercLab)})</th><th>Nome no principal (${esc(data.principalLab)})</th><th class="right">Afeta</th><th class="cmp-nomes-acao edit-only"></th></tr></thead>
+      <tbody>${lista.map(linha).join('')}</tbody>
+    </table></div>
+    ${modo!=='confirmados' && confirmados.length ? `<div class="cmp-det" style="margin-top:8px;">${fmtNum(confirmados.length)} par(es) de nomes já confirmado(s) nesta conferência — <a href="#" onclick="setComparativoFiltro('NOMES_CONFIRMADOS');return false;">ver ou desfazer</a>.</div>` : ''}
+  </div>`;
+}
 function renderComparativoReport(data, conf){
   const tiposComOcorrencia = CMP_TIPOS.filter(t=>conf.porTipo[t.key]>0);
+  const pares = conf.paresNomes || [];
+  const paresPendentes = pares.filter(p=>!p.confirmado), paresConfirmados = pares.filter(p=>p.confirmado);
   let filtro = comparativoFiltro[comparativoTab] || 'TODOS';
-  if(filtro!=='TODOS' && !tiposComOcorrencia.some(t=>t.key===filtro)) filtro = 'TODOS';
+  // conferiu o último nome da lista: passa a mostrar os confirmados (onde dá para desfazer)
+  if(filtro==='PACIENTE_NOME_DIFERENTE' && !paresPendentes.length && paresConfirmados.length) filtro = 'NOMES_CONFIRMADOS';
+  // desfez a última confirmação: volta para a lista de nomes a conferir
+  if(filtro==='NOMES_CONFIRMADOS' && !paresConfirmados.length && paresPendentes.length) filtro = 'PACIENTE_NOME_DIFERENTE';
+  if(filtro!=='TODOS' && !tiposComOcorrencia.some(t=>t.key===filtro) && !(filtro==='NOMES_CONFIRMADOS' && paresConfirmados.length)) filtro = 'TODOS';
+  comparativoFiltro[comparativoTab] = filtro;   // a troca automática vale para as próximas telas
   const linhas = filtro==='TODOS' ? conf.linhas : conf.linhas.filter(l=>l.problemas.some(p=>p.key===filtro));
+  const rotuloFiltro = filtro==='NOMES_CONFIRMADOS' ? 'Nomes confirmados como o mesmo paciente' : cmpTipo(filtro).rotulo;
   const badge = (key, detalhe)=>{
     const t = cmpTipo(key);
     return `<div><span class="badge cmp-${t.cor}" title="${esc(t.texto)}">${esc(t.rotulo)}</span>${detalhe ? `<div class="cmp-det">${esc(detalhe)}</div>` : ''}</div>`;
@@ -6357,14 +6462,17 @@ function renderComparativoReport(data, conf){
           <div class="stat"><div class="label">Sem inconsistência</div><div class="value" style="color:var(--green);font-size:20px;">${fmtNum(conf.semInconsistencia)}</div></div>
           <div class="stat"><div class="label">Com inconsistência</div><div class="value" style="color:var(--red);font-size:20px;">${fmtNum(conf.linhas.length)}</div><div class="hint">Um registro pode ter mais de um tipo de inconsistência.</div></div>
         </div>
-        ${tiposComOcorrencia.length ? `
+        ${(tiposComOcorrencia.length || paresConfirmados.length) ? `
         <div class="cmp-filtros" role="group" aria-label="Filtrar por tipo de inconsistência">
           <button type="button" class="cmp-filtro ${filtro==='TODOS'?'ativo':''}" onclick="setComparativoFiltro('TODOS')">Todas <span class="n">${fmtNum(conf.linhas.length)}</span></button>
           ${tiposComOcorrencia.map(t=>`<button type="button" class="cmp-filtro cmp-${t.cor} ${filtro===t.key?'ativo':''}" title="${esc(t.texto)}" onclick="setComparativoFiltro('${t.key}')">${esc(t.rotulo)} <span class="n">${fmtNum(conf.porTipo[t.key])}</span></button>`).join('')}
+          ${paresConfirmados.length ? `<button type="button" class="cmp-filtro cmp-ok ${filtro==='NOMES_CONFIRMADOS'?'ativo':''}" title="Nomes de paciente confirmados como a mesma pessoa — não contam como inconsistência" onclick="setComparativoFiltro('NOMES_CONFIRMADOS')">✔ Nomes confirmados <span class="n">${fmtNum(paresConfirmados.length)}</span></button>` : ''}
         </div>
-        ${filtro!=='TODOS' ? `<div class="cmp-det" style="margin:-4px 0 10px;">Mostrando só: <b>${esc(cmpTipo(filtro).rotulo)}</b> (${fmtNum(linhas.length)} registro(s)).</div>` : ''}` : ''}
+        ${filtro!=='TODOS' ? `<div class="cmp-det" style="margin:-4px 0 10px;">Mostrando só: <b>${esc(rotuloFiltro)}</b>${filtro==='NOMES_CONFIRMADOS' ? '' : ` (${fmtNum(linhas.length)} registro(s))`}.</div>` : ''}` : ''}
         ${avisos.map(a=>`<div class="helpbox" style="background:var(--amber-soft);border-color:#F1D3AE;color:#8a5a1c;">${a}</div>`).join('')}
-        ${conf.linhas.length===0 ? `<div class="helpbox">Nenhuma inconsistência encontrada — todos os ${fmtNum(conf.total)} registro(s) do arquivo terceirizado foram localizados no arquivo principal, com a mesma quantidade${conf.contratoConferido ? ', e conferem com o Cadastro de Exames' : ''}.</div>` : `
+        ${filtro==='PACIENTE_NOME_DIFERENTE' && paresPendentes.length ? cmpPainelNomes(data, paresPendentes, paresConfirmados, 'pendentes') : ''}
+        ${filtro==='NOMES_CONFIRMADOS' ? cmpPainelNomes(data, paresPendentes, paresConfirmados, 'confirmados') : ''}
+        ${filtro==='NOMES_CONFIRMADOS' ? '' : conf.linhas.length===0 ? `<div class="helpbox">Nenhuma inconsistência encontrada — todos os ${fmtNum(conf.total)} registro(s) do arquivo terceirizado foram localizados no arquivo principal, com a mesma quantidade${conf.contratoConferido ? ', e conferem com o Cadastro de Exames' : ''}.</div>` : `
         <div class="table-wrap"><table>
           <thead><tr><th>Paciente</th><th>Data</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd (Terceirizado)</th><th class="right">Qtd (Principal)</th><th>Situação</th></tr></thead>
           <tbody>
