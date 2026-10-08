@@ -189,6 +189,25 @@ tfoot td{padding:8px 10px;font-weight:700;background:#F2F7F7;border-top:2px soli
 .badge.tipo-6{background:#E1EEFB;color:#28588F;}
 .badge.tipo-7{background:#F7E6F4;color:#8A3B7C;}
 .badge.tipo-8{background:#FFF3D6;color:#8A6A16;}
+/* Conferência (Comparativo entre Laboratórios): tipos de inconsistência */
+.badge.cmp-grave{background:var(--red-soft);color:var(--red);}
+.badge.cmp-atencao{background:var(--amber-soft);color:#8a5a1c;}
+.badge.cmp-conferir{background:#E1EEFB;color:#28588F;}
+.badge.cmp-cadastro{background:#EAE6F8;color:#5B3FA3;}
+.cmp-badges{display:flex;flex-direction:column;gap:5px;}
+.cmp-det{font-size:10.5px;color:var(--ink-soft);margin-top:2px;line-height:1.35;}
+.cmp-filtros{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 12px;}
+.cmp-filtro{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:999px;padding:5px 11px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;}
+.cmp-filtro .n{font-weight:800;}
+.cmp-filtro.cmp-grave{background:var(--red-soft);color:var(--red);border-color:transparent;}
+.cmp-filtro.cmp-atencao{background:var(--amber-soft);color:#8a5a1c;border-color:transparent;}
+.cmp-filtro.cmp-conferir{background:#E1EEFB;color:#28588F;border-color:transparent;}
+.cmp-filtro.cmp-cadastro{background:#EAE6F8;color:#5B3FA3;border-color:transparent;}
+.cmp-filtro.ativo{box-shadow:0 0 0 2px var(--teal-dark);}
+.cmp-legenda{margin-top:12px;font-size:12px;color:var(--ink-soft);}
+.cmp-legenda summary{cursor:pointer;font-weight:700;color:var(--teal-dark);}
+.cmp-legenda-lista{display:flex;flex-direction:column;gap:7px;margin-top:10px;}
+.cmp-legenda-lista .badge{margin-right:6px;}
 .chip{display:inline-flex;align-items:center;gap:5px;background:#EEF5F5;color:var(--teal-dark);border:1px solid #CFE7E5;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;margin:2px 4px 2px 0;}
 .chip a{color:var(--red);text-decoration:none;font-weight:800;line-height:1;}
 .chip a:hover{opacity:.7;}
@@ -911,10 +930,15 @@ function trocarCodigoAcesso(){
                                 página, rodapés, totais e assinaturas — só as linhas de
                                 exames são importadas; lê todas as abas/tabelas do arquivo
                                 e passa a aceitar PDF (gerado pelo sistema do laboratório)
+     4.28.2026  08/10/2026      Comparativo entre Laboratórios: o relatório de inconsistências
+                                mostra o tipo de cada uma (paciente/exame não encontrado, nome ou
+                                descrição diferentes, duplicidade, quantidade, valor, exame não
+                                contratado/inativo/não cadastrado, fora da competência), com
+                                filtro por tipo e legenda; a importação passa a ler o valor do exame
    ============================================================ */
 const APP_CRIACAO = { mes: 7, ano: 2026 };   // julho/2026 = mês 1
-const APP_ALTERACAO = 27;                     // nº acumulado de alterações publicadas
-const APP_DATA = '2026-10-07';                // data desta versão (AAAA-MM-DD)
+const APP_ALTERACAO = 28;                     // nº acumulado de alterações publicadas
+const APP_DATA = '2026-10-08';                // data desta versão (AAAA-MM-DD)
 function appVersao(){
   const p = APP_DATA.split('-').map(Number);
   const ano = p[0], mes = p[1];
@@ -4415,6 +4439,13 @@ function impNumero(v){
   else s = s.replace(',','.');
   return Number(s);
 }
+/* Valor em dinheiro de uma célula ("R$ 8,10", "8,10", 8.1); null quando não há valor. */
+function impValorDinheiro(v){
+  const s = String(v ?? '').trim();
+  if(!s || !/\d/.test(s) || /[\/:]/.test(s)) return null;   // vazio, rótulo ("Valor R$"), data ou hora
+  const n = impNumero(s);
+  return isFinite(n) && n>=0 ? Math.round(n*100)/100 : null;
+}
 /* Diz a que informação do sistema corresponde um título de coluna do arquivo.
    Devolve {campo, pontos} (mais pontos = mais certeza); {campo:'outro'} para colunas
    conhecidas que o sistema não usa (Sexo, Valor, Convênio, Status...); ou null. */
@@ -4443,6 +4474,13 @@ function impCampoDoTitulo(texto){
     if(tem('exame','atend','colet','realiz','entrada','solicit','pedido','requisi','servic','proced','recep','movim','lanc','agend')) return {campo:'data', pontos:90};
     return {campo:'data', pontos:50};
   }
+  // Valor do exame (unitário) — usado na Conferência para comparar com o valor cadastrado.
+  // "Valor Total"/"Valor Final" (soma) não serve e continua como coluna ignorada; "Valor R$"
+  // fica com prioridade baixa porque em alguns relatórios é o total do paciente.
+  if(eh('valorunit','valorunitario','vlrunit','vlrunitario','vlunit','vlunitario','precounitario','precounit','unitario',
+        'valorexame','valordoexame','vlrexame','valorprocedimento')) return {campo:'valor', pontos:100};
+  if(eh('valor','valores','vlr','preco','valorcobrado','valorpago','vlrcobrado')) return {campo:'valor', pontos:80};
+  if(eh('valorr','valorrs','vlrr','vlrrs')) return {campo:'valor', pontos:50};
   if(tem('laborat')) return {campo:'laboratorio', pontos:100};
   if(tem('prestador','executante')) return {campo:'laboratorio', pontos:60};
   if(tem('unidade') && !tem('medida')) return {campo:'unidade', pontos:100};
@@ -4498,7 +4536,8 @@ function impLerCabecalho(cel, modo){
   const ordem = lista => lista.slice().sort((a,b)=>b.pontos-a.pontos);
   const melhor = k => achados[k] ? ordem(achados[k])[0].idx : undefined;
   const mapa = { paciente:melhor('paciente'), exame:melhor('exame'), data:melhor('data'), quantidade:melhor('quantidade'),
-                 laboratorio:melhor('laboratorio'), unidade:melhor('unidade'), resultado:melhor('resultado') };
+                 laboratorio:melhor('laboratorio'), unidade:melhor('unidade'), resultado:melhor('resultado'),
+                 valor:melhor('valor') };
   // Demais colunas de exame (sigla/código ou um 2º nome): alternativas para reconhecer o exame
   mapa.alternativas = ordem((achados.exame||[]).concat(achados.exameAlt||[])).map(a=>a.idx).filter(i=>i!==mapa.exame);
   if(mapa.exame===undefined && mapa.alternativas.length) mapa.exame = mapa.alternativas.shift();
@@ -4598,6 +4637,7 @@ function impExtrairRegistrosModo(blocos, modo){
           registros.push({
             paciente: grupo.paciente, exame: txt, exameAlt: [], data: grupo.data,
             laboratorio: val(mapa.laboratorio), unidade: val(mapa.unidade), resultado: val(mapa.resultado),
+            valor: impValorDinheiro(val(mapa.valor)),
             quantidade: (isFinite(qg) && qg>0) ? qg : 1, origem: bloco.origem,
           });
           continua = true;
@@ -4649,6 +4689,7 @@ function impExtrairRegistrosModo(blocos, modo){
         laboratorio: val(mapa.laboratorio),
         unidade: val(mapa.unidade),
         resultado: val(mapa.resultado),
+        valor: impValorDinheiro(val(mapa.valor)),
         quantidade: (isFinite(q) && q>0) ? q : 1,
         origem: bloco.origem,
       });
@@ -5771,8 +5812,9 @@ function restaurarCompetencia(){
    importado do laboratório TERCEIRIZADO, campo a campo (Paciente, Exame e
    Quantidade), sempre tomando como referência os dados do arquivo terceirizado:
    para cada registro dele, verifica se existe o mesmo paciente/exame no arquivo
-   principal e se a quantidade bate. O relatório final lista o que NÃO foi
-   encontrado (ou está com quantidade diferente) no arquivo do laboratório principal.
+   principal, se a quantidade bate e se o exame confere com o Cadastro de Exames
+   (contrato do laboratório, valor, situação). O relatório lista cada registro com
+   problema e o TIPO de inconsistência (ver CMP_TIPOS, mais abaixo).
    Uma aba independente por tipo de convênio/processo cadastrado. Os arquivos
    importados aqui são usados apenas para esta conferência — nada é gravado em
    Lançamentos nem afeta qualquer outro dado já cadastrado no sistema.
@@ -5811,7 +5853,12 @@ function extractComparativoRows(registros){
     // laboratórios chamem o exame de formas diferentes.
     paciente: r.paciente,
     exame: exameCanonicoDoRegistro(r),
+    // como veio escrito no arquivo: a conferência reconhece de novo pelo cadastro atual
+    exameArquivo: r.exame || (r.exameAlt||[])[0] || '',
+    exameAlt: r.exameAlt || [],
     quantidade: r.quantidade,
+    valor: r.valor ?? null,
+    data: r.data || '',
   })).filter(r=>r.paciente || r.exame);
 }
 async function handleComparativoImport(event, lado){
@@ -5859,28 +5906,249 @@ function limparComparativoTab(){
   render();
   showToast('Comparação desta aba foi limpa.');
 }
-/* Para cada linha do arquivo TERCEIRIZADO, procura paciente+exame correspondente
-   no arquivo PRINCIPAL. Retorna apenas as inconsistências (não encontrado, ou
-   encontrado com quantidade diferente). */
+/* ---------------- Conferência: tipos de inconsistência ----------------
+   Cada linha do arquivo TERCEIRIZADO é procurada no arquivo PRINCIPAL e conferida com o
+   Cadastro de Exames. Uma mesma linha pode ter mais de um tipo. A ordem abaixo é a de
+   gravidade — é nessa ordem que os tipos aparecem no relatório. */
+const CMP_TIPOS = [
+  { key:'PACIENTE_NAO_ENCONTRADO', cor:'grave', rotulo:'Paciente não encontrado no principal',
+    texto:'Nenhum exame deste paciente aparece no arquivo do laboratório principal — nem com nome parecido.' },
+  { key:'EXAME_NAO_ENCONTRADO', cor:'grave', rotulo:'Exame não encontrado para o paciente',
+    texto:'O paciente está no arquivo principal, mas este exame não consta para ele (nem com nome parecido).' },
+  { key:'DUPLICIDADE', cor:'grave', rotulo:'Exame em duplicidade',
+    texto:'O mesmo exame aparece para o paciente mais vezes no arquivo terceirizado do que no principal.' },
+  { key:'EXAME_FORA_CONTRATO', cor:'grave', rotulo:'Exame não contratado com o laboratório',
+    texto:'O exame existe no Cadastro de Exames, mas não para este laboratório terceirizado neste convênio/processo.' },
+  { key:'VALOR_DIVERGENTE', cor:'atencao', rotulo:'Valor diferente do cadastrado',
+    texto:'O valor que veio no arquivo terceirizado é diferente do valor unitário cadastrado para o exame neste laboratório e convênio.' },
+  { key:'QTD_DIVERGENTE', cor:'atencao', rotulo:'Quantidade divergente',
+    texto:'O exame foi encontrado no principal, mas com quantidade diferente.' },
+  { key:'FORA_COMPETENCIA', cor:'atencao', rotulo:'Data fora da competência',
+    texto:'A data do exame no arquivo terceirizado não pertence à competência em conferência.' },
+  { key:'EXAME_INATIVO', cor:'atencao', rotulo:'Exame inativo no cadastro',
+    texto:'O exame está cadastrado para este laboratório e convênio, mas marcado como Inativo.' },
+  { key:'PACIENTE_NOME_DIFERENTE', cor:'conferir', rotulo:'Nome do paciente diferente',
+    texto:'O exame foi encontrado no principal para um paciente com nome parecido (abreviado, sem um sobrenome ou com erro de digitação). Confira se é a mesma pessoa.' },
+  { key:'EXAME_DESCRICAO_DIFERENTE', cor:'conferir', rotulo:'Exame com outra descrição',
+    texto:'O paciente tem no principal um exame com nome parecido, escrito de outro jeito. Se for o mesmo exame, cadastre esse nome como apelido em Cadastros → Exames e a diferença deixa de aparecer.' },
+  { key:'EXAME_NAO_CADASTRADO', cor:'cadastro', rotulo:'Exame não cadastrado',
+    texto:'O nome do exame no arquivo não corresponde a nenhum exame (nem apelido) do Cadastro de Exames — por isso o contrato e o valor não puderam ser conferidos.' },
+];
+function cmpTipo(key){ return CMP_TIPOS.find(t=>t.key===key) || { key, rotulo:key, cor:'conferir', texto:'' }; }
+function cmpOrdem(key){ const i = CMP_TIPOS.findIndex(t=>t.key===key); return i<0 ? 99 : i; }
+/* Chave de comparação de nome de exame: sem acento, espaço nem pontuação */
+function cmpChave(s){ return normTxt(s).replace(/[^A-Z0-9]/g,''); }
+/* Nome de paciente para comparação: só letras, sem acento */
+function cmpNomePac(s){ return normTxt(s).replace(/[^A-Z ]/g,' ').replace(/\s+/g,' ').trim(); }
+function cmpLev(a, b){
+  if(a===b) return 0;
+  if(!a.length) return b.length;
+  if(!b.length) return a.length;
+  let ant = Array.from({length:b.length+1}, (_,j)=>j);
+  for(let i=1; i<=a.length; i++){
+    const cur = [i];
+    for(let j=1; j<=b.length; j++) cur[j] = Math.min(ant[j]+1, cur[j-1]+1, ant[j-1] + (a[i-1]===b[j-1] ? 0 : 1));
+    ant = cur;
+  }
+  return ant[b.length];
+}
+const CMP_LIGACOES = new Set(['DA','DE','DO','DAS','DOS','E']);
+/* Quanto dois nomes de paciente se parecem (0 a 1). O primeiro nome tem de bater (aceita
+   uma letra de diferença); depois vale nome sem um sobrenome, sobrenome abreviado
+   ("MARIA A SILVA") ou pequeno erro de digitação. */
+function cmpNomeParecido(a, b){
+  if(a===b) return 1;
+  const ta = a.split(' ').filter(t=>t && !CMP_LIGACOES.has(t)), tb = b.split(' ').filter(t=>t && !CMP_LIGACOES.has(t));
+  if(!ta.length || !tb.length) return 0;
+  if(ta[0]!==tb[0] && (Math.min(ta[0].length, tb[0].length)<4 || cmpLev(ta[0], tb[0])>1)) return 0;
+  const [m, M] = ta.length<=tb.length ? [ta, tb] : [tb, ta];
+  const temNo = t => M.includes(t) || (t.length===1 && M.some(x=>x[0]===t)) || (t.length>=5 && M.some(x=>x.length>=5 && cmpLev(t,x)<=1));
+  if(m.length>=2 && m.every(temNo)) return 0.9;
+  const s1 = ta.join(' '), s2 = tb.join(' ');
+  return 1 - cmpLev(s1, s2)/Math.max(s1.length, s2.length);
+}
+/* Palavras que não ajudam a distinguir um exame do outro */
+const CMP_PALAVRAS_EXAME = new Set(['DE','DA','DO','DAS','DOS','E','EM','NO','NA','PARA','POR','DOSAGEM','PESQUISA','EXAME','DETERMINACAO']);
+function cmpPalavrasExame(s){ return normTxt(s).replace(/[^A-Z0-9]/g,' ').split(/\s+/).filter(t=>t && !CMP_PALAVRAS_EXAME.has(t)); }
+/* Quanto dois nomes de exame se parecem (0 a 1), palavra por palavra: "DOSAGEM DE VITAMINA
+   B12" = "VITAMINA B12"; "POTASIO" ≈ "POTASSIO". Siglas curtas têm de ser iguais (IGG ≠ IGM). */
+function cmpExameParecido(nomesA, nomesB){
+  let melhor = 0;
+  const igual = (x,y)=> x===y || (x.length>=5 && y.length>=5 && cmpLev(x,y)<=1);
+  nomesA.forEach(a=>{
+    const ta = cmpPalavrasExame(a);
+    if(!ta.length) return;
+    nomesB.forEach(b=>{
+      const tb = cmpPalavrasExame(b);
+      if(!tb.length) return;
+      const comuns = ta.filter(x=>tb.some(y=>igual(x,y))).length;
+      let s = 2*comuns/(ta.length+tb.length);
+      const [m, M] = ta.length<=tb.length ? [ta, tb] : [tb, ta];
+      if(m.every(x=>M.some(y=>igual(x,y))) && m.some(x=>x.length>=3)) s = Math.max(s, 0.85);
+      melhor = Math.max(melhor, s);
+    });
+  });
+  return melhor;
+}
+/* Reconhece o exame no Cadastro de Exames (descrição ou apelido; senão, a busca aproximada
+   de sempre). O mesmo exame costuma estar cadastrado uma vez por laboratório/convênio com a
+   mesma descrição — todos entram, e os nomes/apelidos de todos servem para casar os arquivos. */
+function cmpReconhecerExame(textos){
+  textos = textos.filter(t=>cmpChave(t));
+  const chavesTexto = new Set(textos.map(cmpChave));
+  let regs = STATE.exames.filter(e=>exameNomesPossiveis(e).some(n=>chavesTexto.has(cmpChave(n))));
+  let aprox = false;   // reconhecido só por aproximação (o nome não é a descrição nem um apelido)
+  if(!regs.length && textos[0]){
+    const ex = STATE.exames.find(e=>exameCasaComTexto(e, textos[0]));
+    if(ex){ regs = [ex]; aprox = true; }
+  }
+  const descs = new Set(regs.map(e=>cmpChave(e.descricao)));
+  regs = STATE.exames.filter(e=>descs.has(cmpChave(e.descricao)));
+  const chaves = new Set(chavesTexto);
+  regs.forEach(e=>exameNomesPossiveis(e).forEach(n=>{ const c = cmpChave(n); if(c) chaves.add(c); }));
+  return { regs, chaves, aprox };
+}
+function cmpMesAno(d){
+  const s = String(d||'');
+  let m = s.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
+  if(m){ let a = Number(m[3]); if(a<100) a += 2000; return { mes:Number(m[2]), ano:a }; }
+  m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  return m ? { mes:Number(m[2]), ano:Number(m[1]) } : null;
+}
+/* Faz a conferência. O resultado fica guardado (só na memória da tela) enquanto os arquivos,
+   o Cadastro de Exames e a competência não mudarem — nada disso é gravado no sistema. */
 function computeComparativoInconsistencias(data){
   if(!data.principalRows || !data.tercRows) return null;
-  const principalIndex = new Map();
-  data.principalRows.forEach(r=>{
-    const k = normTxt(r.paciente)+'|'+normTxt(r.exame);
-    if(!principalIndex.has(k)) principalIndex.set(k, []);
-    principalIndex.get(k).push(r);
+  const cadConv = cadastroValueFor(comparativoTab);
+  const assinatura = [comparativoTab, cadConv, data.tercLab, STATE.competencia.mes, STATE.competencia.ano,
+    STATE.exames.map(e=>[e.id, e.descricao, (e.apelidos||[]).join('/'), e.laboratorio, e.convenio, e.tipo, e.valorUnit].join('~')).join('|')].join('#');
+  const c = data._conferencia;
+  if(c && c.p===data.principalRows && c.t===data.tercRows && c.assinatura===assinatura) return c.res;
+  const res = cmpConferir(data, cadConv);
+  data._conferencia = { p:data.principalRows, t:data.tercRows, assinatura, res };
+  return res;
+}
+function cmpConferir(data, cadConv){
+  const cacheExame = new Map();
+  const preparar = r=>{
+    // nome como veio no arquivo (e sigla/código); o nome já "traduzido" na importação só é
+    // usado para conferências importadas antes desta versão
+    const textos = (r.exameArquivo ? [r.exameArquivo, ...(r.exameAlt||[])] : [r.exame]).filter(Boolean);
+    const k = textos.join('|');
+    if(!cacheExame.has(k)) cacheExame.set(k, cmpReconhecerExame(textos));
+    const x = cacheExame.get(k);
+    return { r, pac:cmpNomePac(r.paciente), chaves:x.chaves, regs:x.regs, aprox:x.aprox, texto:textos[0] || '',
+             nomes:[r.exameArquivo || r.exame, r.exame].filter(Boolean), usado:false };
+  };
+  const P = data.principalRows.map(preparar), T = data.tercRows.map(preparar);
+  const porPac = new Map();
+  P.forEach(p=>{ if(!porPac.has(p.pac)) porPac.set(p.pac, []); porPac.get(p.pac).push(p); });
+  const mesmoExame = (a,b)=>{ for(const k of a.chaves) if(b.chaves.has(k)) return true; return false; };
+  const parecido = (t, lista)=> lista.map(p=>({ p, s:cmpExameParecido(t.nomes, p.nomes) })).filter(o=>o.s>=0.7).sort((a,b)=>b.s-a.s)[0];
+
+  // 1) mesmo paciente e mesmo exame — cada linha do principal só "atende" uma linha do
+  //    terceirizado (assim a cobrança em dobro aparece); prefere a de mesma quantidade
+  T.forEach(t=>{
+    const lista = (porPac.get(t.pac)||[]).filter(p=>!p.usado && mesmoExame(t,p));
+    const m = lista.find(p=>Number(p.r.quantidade)===Number(t.r.quantidade)) || lista[0];
+    if(m){ m.usado = true; t.par = m; }
   });
-  const inconsistencias = [];
-  data.tercRows.forEach(r=>{
-    const k = normTxt(r.paciente)+'|'+normTxt(r.exame);
-    const matches = principalIndex.get(k);
-    if(!matches || matches.length===0){
-      inconsistencias.push({...r, situacao:'NAO_ENCONTRADO', qtdPrincipal:null});
-    } else if(!matches.some(m=>Number(m.quantidade)===Number(r.quantidade))){
-      inconsistencias.push({...r, situacao:'QTD_DIVERGENTE', qtdPrincipal:matches[0].quantidade});
+  // 2) mesmo paciente: exame já usado (duplicidade) ou com descrição parecida
+  T.forEach(t=>{
+    if(t.par) return;
+    const lista = porPac.get(t.pac);
+    if(!lista) return;
+    t.pacienteNoPrincipal = true;
+    const iguais = lista.filter(p=>mesmoExame(t,p));
+    if(iguais.length){
+      t.duplicidade = { principal:iguais.length, terceirizado:T.filter(x=>x.pac===t.pac && mesmoExame(x,t)).length };
+      return;
     }
+    const e = parecido(t, lista.filter(p=>!p.usado));
+    if(e){ e.p.usado = true; t.par = e.p; t.descricaoDiferente = true; }
   });
-  return inconsistencias;
+  // 3) paciente com nome parecido no principal (só vale se o exame também estiver lá). Vale
+  //    também quando o nome exato existe mas sem este exame: o mesmo paciente pode ter dois
+  //    atendimentos no mês, um deles digitado com o nome diferente.
+  const nomesPrincipal = [...porPac.keys()];
+  T.forEach(t=>{
+    if(t.par || t.duplicidade || !t.pac) return;
+    const cands = nomesPrincipal.filter(n=>n!==t.pac).map(n=>({ n, s:cmpNomeParecido(t.pac, n) })).filter(o=>o.s>=0.85).sort((a,b)=>b.s-a.s);
+    for(const c of cands){
+      const livres = porPac.get(c.n).filter(p=>!p.usado);
+      let m = livres.find(p=>mesmoExame(t,p)), desc = false;
+      if(!m){ const e = parecido(t, livres); if(e){ m = e.p; desc = true; } }
+      if(m){ m.usado = true; t.par = m; t.nomeDiferente = m.r.paciente; t.descricaoDiferente = desc; return; }
+    }
+    if(cands.length) t.nomeParecido = porPac.get(cands[0].n)[0].r.paciente;
+  });
+  // 4) mesmo exame, mas um dos laboratórios escreveu o nome de um jeito que o cadastro só
+  //    reconhece por aproximação (ex.: "SODIO SERICO" × "SÓDIO") — avisa para cadastrar o apelido
+  T.forEach(t=>{
+    if(t.par && !t.descricaoDiferente && (t.aprox || t.par.aprox) && cmpChave(t.texto)!==cmpChave(t.par.texto)) t.descricaoDiferente = true;
+  });
+
+  // Competência: só confere a data quando a maior parte do arquivo é da competência atual
+  // (se o arquivo inteiro for de outro mês, a conferência de data é pulada e o relatório avisa)
+  const comp = { mes:MESES.indexOf(STATE.competencia.mes)+1, ano:Number(STATE.competencia.ano) };
+  const datas = T.map(t=>cmpMesAno(t.r.data)).filter(Boolean);
+  const naComp = datas.filter(d=>d.mes===comp.mes && d.ano===comp.ano).length;
+  const dataConferida = comp.mes>0 && datas.length>0 && naComp >= 0.6*datas.length;
+  // Contrato e valor: só confere se houver exames cadastrados para o laboratório neste convênio
+  const lab = normTxt(data.tercLab);
+  const contratoConferido = STATE.exames.some(e=>normTxt(e.laboratorio)===lab && e.convenio===cadConv);
+
+  const linhas = [], porTipo = {};
+  CMP_TIPOS.forEach(t=>{ porTipo[t.key] = 0; });
+  T.forEach(t=>{
+    const r = t.r, problemas = [];
+    const add = (key, detalhe)=>problemas.push({ key, detalhe:detalhe || '' });
+    if(!t.par){
+      if(t.duplicidade) add('DUPLICIDADE', `${t.duplicidade.terceirizado}× no terceirizado, ${t.duplicidade.principal}× no principal`);
+      else if(t.pacienteNoPrincipal){
+        const tem = [...new Set(porPac.get(t.pac).map(p=>p.r.exame || p.r.exameArquivo))];
+        add('EXAME_NAO_ENCONTRADO', 'No principal o paciente tem: ' + tem.slice(0,4).join(', ') + (tem.length>4 ? '…' : ''));
+      }
+      else add('PACIENTE_NAO_ENCONTRADO', t.nomeParecido ? `Nome parecido no principal: ${t.nomeParecido} (sem este exame)` : '');
+    } else {
+      if(t.nomeDiferente) add('PACIENTE_NOME_DIFERENTE', `No principal: ${t.nomeDiferente}`);
+      if(t.descricaoDiferente) add('EXAME_DESCRICAO_DIFERENTE', `No principal: ${t.par.r.exameArquivo || t.par.r.exame}`);
+      if(Number(t.par.r.quantidade)!==Number(r.quantidade)) add('QTD_DIVERGENTE', `Terceirizado ${fmtNum(r.quantidade)} × principal ${fmtNum(t.par.r.quantidade)}`);
+    }
+    let contrato = null;
+    if(!t.regs.length) add('EXAME_NAO_CADASTRADO');
+    else if(contratoConferido){
+      const doLab = t.regs.filter(e=>normTxt(e.laboratorio)===lab && e.convenio===cadConv);
+      if(!doLab.length){
+        add('EXAME_FORA_CONTRATO', 'Cadastrado para: ' + [...new Set(t.regs.map(e=>e.laboratorio))].slice(0,3).join(', '));
+      } else {
+        contrato = doLab.find(e=>e.tipo==='ATIVO') || null;
+        if(!contrato){ add('EXAME_INATIVO'); contrato = doLab[0]; }
+        const vu = Number(contrato.valorUnit), v = r.valor;
+        if(v!=null && vu>0){
+          const q = Number(r.quantidade) || 1;
+          if(Math.abs(v-vu)>0.005 && Math.abs(v-vu*q)>0.005) add('VALOR_DIVERGENTE', `Arquivo ${fmtMoney(v)} × cadastro ${fmtMoney(vu)}`);
+        }
+      }
+    }
+    if(dataConferida){
+      const d = cmpMesAno(r.data);
+      if(d && (d.mes!==comp.mes || d.ano!==comp.ano)) add('FORA_COMPETENCIA', `Data no arquivo: ${r.data}`);
+    }
+    if(!problemas.length) return;
+    problemas.sort((a,b)=>cmpOrdem(a.key)-cmpOrdem(b.key));
+    problemas.forEach(p=>{ porTipo[p.key]++; });
+    const ref = contrato || t.regs[0] || null;
+    linhas.push({
+      paciente:r.paciente, data:r.data, quantidade:r.quantidade, valor:r.valor ?? null,
+      exameArquivo:r.exameArquivo || r.exame || '', exame:ref ? ref.descricao : (r.exame || r.exameArquivo || ''),
+      qtdPrincipal:t.par ? t.par.r.quantidade : null,
+      valorCadastro:ref ? Number(ref.valorUnit) : null,
+      problemas,
+    });
+  });
+  return { linhas, porTipo, total:T.length, semInconsistencia:T.length - linhas.length,
+           contratoConferido, dataConferida, temDatas:datas.length>0 };
 }
 function viewComparativo(){
   if(!STATE.tiposConvenio.find(t=>t.key===comparativoTab)) comparativoTab = STATE.tiposConvenio[0]?.key;
@@ -5899,9 +6167,11 @@ function viewComparativo(){
       <div class="flexrow" style="align-items:flex-start;">
         <div>
           Selecione o laboratório <b>Principal (Público)</b> e importe o arquivo dele; depois selecione o laboratório
-          <b>Terceirizado</b> e importe o arquivo dele. O sistema compara Paciente, Exame e Quantidade entre os dois
-          arquivos e lista, sempre com base no arquivo terceirizado, tudo que não foi encontrado (ou está com
-          quantidade diferente) no arquivo do laboratório principal. Esta conferência não é salva em Lançamentos —
+          <b>Terceirizado</b> e importe o arquivo dele. Sempre com base no arquivo terceirizado, o sistema procura cada
+          exame no arquivo principal e confere com o <b>Cadastro de Exames</b>. O relatório mostra o <b>tipo</b> de cada
+          inconsistência — paciente ou exame não encontrado, nome do paciente ou descrição do exame diferentes,
+          exame em duplicidade, quantidade ou valor diferentes, exame não contratado com o laboratório, fora da
+          competência… — e permite filtrar por tipo. Esta conferência não é salva em Lançamentos —
           reimportar um arquivo sempre SUBSTITUI o anterior daquele lado, nunca duplica.
           Os arquivos (.xlsx, .csv, .docx, .txt ou .pdf) podem vir do jeito que o laboratório emite: títulos do
           relatório, cabeçalhos repetidos nas quebras de página, números de página, rodapés e totais são
@@ -5942,9 +6212,33 @@ function viewComparativo(){
     ${!inconsistencias ? '' : renderComparativoReport(data, inconsistencias)}
   `;
 }
-function renderComparativoReport(data, inconsistencias){
-  const naoEncontrados = inconsistencias.filter(i=>i.situacao==='NAO_ENCONTRADO');
-  const divergentes = inconsistencias.filter(i=>i.situacao==='QTD_DIVERGENTE');
+/* Filtro do relatório de inconsistências, por aba: 'TODOS' ou um tipo de CMP_TIPOS.
+   Só muda o que aparece na tela/impressão — não altera a conferência. */
+let comparativoFiltro = {};
+function setComparativoFiltro(f){ comparativoFiltro[comparativoTab] = f; render(); }
+function renderComparativoReport(data, conf){
+  const tiposComOcorrencia = CMP_TIPOS.filter(t=>conf.porTipo[t.key]>0);
+  let filtro = comparativoFiltro[comparativoTab] || 'TODOS';
+  if(filtro!=='TODOS' && !tiposComOcorrencia.some(t=>t.key===filtro)) filtro = 'TODOS';
+  const linhas = filtro==='TODOS' ? conf.linhas : conf.linhas.filter(l=>l.problemas.some(p=>p.key===filtro));
+  const badge = (key, detalhe)=>{
+    const t = cmpTipo(key);
+    return `<div><span class="badge cmp-${t.cor}" title="${esc(t.texto)}">${esc(t.rotulo)}</span>${detalhe ? `<div class="cmp-det">${esc(detalhe)}</div>` : ''}</div>`;
+  };
+  // nome do exame como veio no arquivo, quando não é a descrição nem um apelido cadastrado
+  const nomeNoArquivo = l=>{
+    if(!l.exameArquivo) return '';
+    const ex = STATE.exames.find(e=>cmpChave(e.descricao)===cmpChave(l.exame));
+    const nomes = (ex ? exameNomesPossiveis(ex) : [l.exame]).map(cmpChave);
+    return nomes.includes(cmpChave(l.exameArquivo)) ? '' : `<div class="cmp-det">no arquivo: ${esc(l.exameArquivo)}</div>`;
+  };
+  const avisos = [];
+  if(!conf.contratoConferido){
+    avisos.push(`Nenhum exame está cadastrado para <b>${esc(data.tercLab)}</b> neste convênio/processo — por isso o contrato e o valor dos exames não foram conferidos. Cadastre os exames do laboratório em <b>Cadastros → Exames</b>.`);
+  }
+  if(conf.temDatas && !conf.dataConferida){
+    avisos.push(`As datas do arquivo terceirizado não são, na maior parte, da competência atual (${esc(competenciaLabel(STATE.competencia.mes, STATE.competencia.ano))}) — por isso a conferência de data foi pulada.`);
+  }
   return `
     <div class="card">
       <div class="flexrow">
@@ -5956,26 +6250,43 @@ function renderComparativoReport(data, inconsistencias){
       </div>
       <div id="printComparativo">
         ${reportHeaderHTML({convenio:convenioLabel(comparativoTab), laboratorio:`${data.principalLab} (principal) vs ${data.tercLab} (terceirizado)`, vigencia:'—', competenciaText:competenciaLabel(STATE.competencia.mes, STATE.competencia.ano)})}
-        <div class="grid cols-3" style="margin-bottom:14px;">
-          <div class="stat"><div class="label">Registros no arquivo terceirizado</div><div class="value">${fmtNum(data.tercRows.length)}</div></div>
-          <div class="stat"><div class="label">Não encontrados no principal</div><div class="value" style="color:var(--red);font-size:20px;">${fmtNum(naoEncontrados.length)}</div></div>
-          <div class="stat"><div class="label">Quantidade divergente</div><div class="value" style="color:#8a5a1c;font-size:20px;">${fmtNum(divergentes.length)}</div></div>
+        <div class="grid cols-3" style="margin-bottom:12px;">
+          <div class="stat"><div class="label">Registros no arquivo terceirizado</div><div class="value">${fmtNum(conf.total)}</div></div>
+          <div class="stat"><div class="label">Sem inconsistência</div><div class="value" style="color:var(--green);font-size:20px;">${fmtNum(conf.semInconsistencia)}</div></div>
+          <div class="stat"><div class="label">Com inconsistência</div><div class="value" style="color:var(--red);font-size:20px;">${fmtNum(conf.linhas.length)}</div><div class="hint">Um registro pode ter mais de um tipo de inconsistência.</div></div>
         </div>
-        ${inconsistencias.length===0 ? `<div class="helpbox">Nenhuma inconsistência encontrada — todos os registros do arquivo terceirizado foram localizados no arquivo principal, com a mesma quantidade.</div>` : `
+        ${tiposComOcorrencia.length ? `
+        <div class="cmp-filtros" role="group" aria-label="Filtrar por tipo de inconsistência">
+          <button type="button" class="cmp-filtro ${filtro==='TODOS'?'ativo':''}" onclick="setComparativoFiltro('TODOS')">Todas <span class="n">${fmtNum(conf.linhas.length)}</span></button>
+          ${tiposComOcorrencia.map(t=>`<button type="button" class="cmp-filtro cmp-${t.cor} ${filtro===t.key?'ativo':''}" title="${esc(t.texto)}" onclick="setComparativoFiltro('${t.key}')">${esc(t.rotulo)} <span class="n">${fmtNum(conf.porTipo[t.key])}</span></button>`).join('')}
+        </div>
+        ${filtro!=='TODOS' ? `<div class="cmp-det" style="margin:-4px 0 10px;">Mostrando só: <b>${esc(cmpTipo(filtro).rotulo)}</b> (${fmtNum(linhas.length)} registro(s)).</div>` : ''}` : ''}
+        ${avisos.map(a=>`<div class="helpbox" style="background:var(--amber-soft);border-color:#F1D3AE;color:#8a5a1c;">${a}</div>`).join('')}
+        ${conf.linhas.length===0 ? `<div class="helpbox">Nenhuma inconsistência encontrada — todos os ${fmtNum(conf.total)} registro(s) do arquivo terceirizado foram localizados no arquivo principal, com a mesma quantidade${conf.contratoConferido ? ', e conferem com o Cadastro de Exames' : ''}.</div>` : `
         <div class="table-wrap"><table>
-          <thead><tr><th>Paciente</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd (Terceirizado)</th><th class="right">Qtd (Principal)</th><th>Situação</th></tr></thead>
+          <thead><tr><th>Paciente</th><th>Data</th><th class="right">Vlr Unit.</th><th>Exame</th><th class="right">Qtd (Terceirizado)</th><th class="right">Qtd (Principal)</th><th>Situação</th></tr></thead>
           <tbody>
-            ${inconsistencias.map(i=>{ const vu = valorUnitPorNomeExame(i.exame); return `<tr>
-              <td>${esc(i.paciente)||'—'}</td>
-              <td class="right">${vu===null?'—':fmtMoney(vu)}</td>
-              <td>${i.exame ? exameCellHTML(null, i.exame) : '—'}</td>
-              <td class="right">${fmtNum(i.quantidade)}</td>
-              <td class="right">${i.qtdPrincipal===null?'—':fmtNum(i.qtdPrincipal)}</td>
-              <td><span class="badge ${i.situacao==='NAO_ENCONTRADO'?'inativo':'terceirizado'}">${i.situacao==='NAO_ENCONTRADO'?'Não encontrado no principal':'Quantidade divergente'}</span></td>
+            ${linhas.map(l=>{
+              const valorArquivo = l.valor!=null && (l.valorCadastro==null || Math.abs(l.valor-l.valorCadastro)>0.005)
+                ? `<div class="cmp-det">arquivo: ${fmtMoney(l.valor)}</div>` : '';
+              return `<tr>
+              <td>${esc(l.paciente)||'—'}</td>
+              <td style="white-space:nowrap;">${esc(l.data)||'—'}</td>
+              <td class="right">${l.valorCadastro==null ? '—' : fmtMoney(l.valorCadastro)}${valorArquivo}</td>
+              <td>${l.exame ? exameCellHTML(null, l.exame) : '—'}${nomeNoArquivo(l)}</td>
+              <td class="right">${fmtNum(l.quantidade)}</td>
+              <td class="right">${l.qtdPrincipal===null ? '—' : fmtNum(l.qtdPrincipal)}</td>
+              <td><div class="cmp-badges">${l.problemas.map(p=>badge(p.key, p.detalhe)).join('')}</div></td>
             </tr>`;}).join('')}
           </tbody>
         </table></div>
         `}
+        <details class="cmp-legenda">
+          <summary>O que significa cada situação</summary>
+          <div class="cmp-legenda-lista">
+            ${CMP_TIPOS.map(t=>`<div><span class="badge cmp-${t.cor}">${esc(t.rotulo)}</span> <span>${esc(t.texto)}</span></div>`).join('')}
+          </div>
+        </details>
       </div>
     </div>
   `;
