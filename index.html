@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
@@ -1000,10 +999,15 @@ function trocarCodigoAcesso(){
                                 na cópia corrigida do arquivo do outro laboratório; "Salvar arquivos
                                 corrigidos" na pasta de trabalho (CONFERÊNCIA/LANÇAMENTOS no Chrome/
                                 Edge, ou Downloads); Lançar Exames importa direto da pasta LANÇAMENTOS
+     4.32.2026  19/10/2026      Tipos de Convênio/Processo: data de início, prazo de duração e valor
+                                contratado (vencimento calculado); tela nova "Vencimentos dos
+                                Convênios" (a vencer, vencidos, valor já executado)
+     4.33.2026  19/10/2026      Retirado o carregamento da biblioteca Chart.js (não é usada — os
+                                gráficos são em HTML puro — e o endereço no cdnjs dava erro 404)
    ============================================================ */
 const APP_CRIACAO = { mes: 7, ano: 2026 };   // julho/2026 = mês 1
-const APP_ALTERACAO = 31;                     // nº acumulado de alterações publicadas
-const APP_DATA = '2026-10-08';                // data desta versão (AAAA-MM-DD)
+const APP_ALTERACAO = 33;                     // nº acumulado de alterações publicadas
+const APP_DATA = '2026-10-19';                // data desta versão (AAAA-MM-DD)
 function appVersao(){
   const p = APP_DATA.split('-').map(Number);
   const ano = p[0], mes = p[1];
@@ -1664,6 +1668,7 @@ const NAV_BASE = [
     {id:'labs', label:'Laboratórios/Clínicas/Operadoras', icon:'🏥'},
     {id:'exames', label:'Exames', icon:'🧾'},
     {id:'tiposConvenio', label:'Tipos de Convênio/Processo', icon:'📁'},
+    {id:'vencimentos', label:'Vencimentos dos Convênios', icon:'⏰'},
     {id:'configGlosas', label:'Configurar Glosas', icon:'⚙️'},
   ]},
   {group:'2. Conferência', items:[
@@ -1699,6 +1704,7 @@ const PAGE_META = {
   labs:['Cadastro de Laboratórios/Clínicas/Operadoras','Cadastre os laboratórios, clínicas e operadoras conveniados, o responsável (gestor/diretor) e os contatos.'],
   exames:['Cadastro de Exames','Defina exames, cotas (principal/reserva) e valor unitário por laboratório e convênio.'],
   tiposConvenio:['Tipos de Convênio/Processo','Cadastre, altere o nome ou exclua os tipos de convênio/processo usados em todo o sistema.'],
+  vencimentos:['Vencimentos dos Convênios','Prazo de vencimento de cada convênio, processo, contrato ou compra direta: o que vence primeiro, os vencidos e o valor já executado.'],
   configGlosas:['Configurar Glosas','Cronograma de recurso, motivos, justificativas e plano de ação — a base que alimenta o Lançamento de Glosas e o Relatório de Glosas.'],
   lancamento:['Lançamento de Exames','Registre os exames realizados por paciente, por tipo de convênio/processo.'],
   nf:['Emissão de N.F.','Resumo de quantidades e valores para solicitar as notas fiscais dos laboratórios.'],
@@ -1840,6 +1846,7 @@ function render(){
   else if(currentView==='labs') v.innerHTML = viewLabs();
   else if(currentView==='exames') v.innerHTML = viewExames();
   else if(currentView==='tiposConvenio') v.innerHTML = viewTiposConvenio();
+  else if(currentView==='vencimentos') v.innerHTML = viewVencimentos();
   else if(currentView==='lancamento') v.innerHTML = viewLancamento();
   else if(currentView==='nf') v.innerHTML = viewNF();
   else if(currentView==='comparativo') v.innerHTML = viewComparativo();
@@ -4159,17 +4166,19 @@ function viewTiposConvenio(){
         <div class="field"><label>% Cota Reserva</label><input id="tcPctReserva" type="number" min="1" max="99" step="1" value="${editing?editing.pctReserva:25}" oninput="onChangeTcPct('reserva')"></div>
       </div>
       <div class="muted" style="font-size:11.5px;margin-top:4px;">Exemplo: Cota Principal 75% e Cota Reserva 25%, ou deixe a caixa acima desmarcada para Cota Principal 100% e Cota Reserva 0%. Os dois percentuais somados devem dar 100%.</div>
+      ${tcVigCamposHTML(editing)}
       ${editing ? `<div style="margin-top:10px;"><button class="btn secondary small" onclick="cancelEditTipoConvenio()">Cancelar</button></div>` : ''}
     </div>
     <div class="card">
       <h2>Tipos cadastrados</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>Nome exibido</th><th>Cotas</th><th></th></tr></thead>
+        <thead><tr><th>Nome exibido</th><th>Cotas</th><th>Vigência</th><th>Situação</th><th></th></tr></thead>
         <tbody>
-          ${STATE.tiposConvenio.length===0 ? `<tr class="empty-row"><td colspan="3">Nenhum tipo cadastrado.</td></tr>` :
+          ${STATE.tiposConvenio.length===0 ? `<tr class="empty-row"><td colspan="5">Nenhum tipo cadastrado.</td></tr>` :
             STATE.tiposConvenio.map(t=>`<tr>
               <td><span class="badge ${t.badge}">${esc(t.label)}</span></td>
               <td>${t.usaCotaReserva ? `Principal ${fmtNum(t.pctPrincipal)}% / Reserva ${fmtNum(t.pctReserva)}%` : 'Somente cota principal (100%)'}</td>
+              ${tcVigCelulasHTML(t)}
               <td class="edit-only">
                 <button class="btn ghost small" onclick="editTipoConvenio('${t.key}')">✏️ editar</button>
                 <button class="btn ghost small" onclick="deleteTipoConvenio('${t.key}')">🗑 excluir</button>
@@ -4180,6 +4189,163 @@ function viewTiposConvenio(){
     </div>
   `;
 }
+/* ============================================================
+   VIGÊNCIA DOS TIPOS DE CONVÊNIO/PROCESSO E TELA DE VENCIMENTOS
+   (4.32.2026 — também na cópia que roda dentro do Programa Integral de Saúde)
+   Cada tipo de convênio/processo/contrato/compra direta ganha: data de
+   início, prazo de duração (meses, dias ou anos) e, se quiser, o valor
+   contratado. O vencimento é calculado (início + prazo − 1 dia). A tela
+   "Vencimentos dos Convênios" mostra o que vence primeiro, os vencidos e
+   o valor já executado (lançamentos da competência + competências
+   fechadas) — no modelo do GestorContratos.
+   Os campos novos ficam no próprio tipo (vigInicio, vigPrazo, vigUnidade,
+   vigValor, vigFim); os tipos antigos continuam iguais ("sem vigência").
+   ============================================================ */
+const VIG_UNIDADES=['meses','dias','anos'];
+function vigISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function vigHoje(){ return vigISO(new Date()); }
+function vigSomar(iso, n, un){
+  const p=String(iso||'').split('-').map(Number); if(p.length!==3 || !p[0] || !p[1] || !p[2] || !(n>0)) return '';
+  let d;
+  if(un==='dias') d=new Date(p[0], p[1]-1, p[2]+n);
+  else { const meses=un==='anos'?n*12:n; const alvo=new Date(p[0], p[1]-1+meses, 1); const ult=new Date(alvo.getFullYear(), alvo.getMonth()+1, 0).getDate(); d=new Date(alvo.getFullYear(), alvo.getMonth(), Math.min(p[2], ult)); }
+  d.setDate(d.getDate()-1);   /* 01/01 + 12 meses → vence em 31/12 */
+  return vigISO(d);
+}
+function vigFim(t){ return t && t.vigInicio && Number(t.vigPrazo)>0 ? vigSomar(t.vigInicio, Number(t.vigPrazo), t.vigUnidade||'meses') : ''; }
+function vigDias(iso){ if(!iso) return null; const a=new Date(vigHoje()+'T12:00:00'), b=new Date(iso+'T12:00:00'); return Math.round((b-a)/86400000); }
+function vigSituacao(t){
+  const fim=vigFim(t); if(!fim) return {cls:'vig-sem', txt:'sem vigência', dias:null, fim:''};
+  const n=vigDias(fim);
+  if(n<0) return {cls:'vig-venc', txt:'vencido há '+(-n)+(n===-1?' dia':' dias'), dias:n, fim};
+  if(n===0) return {cls:'vig-crit', txt:'vence hoje', dias:0, fim};
+  return {cls:n<=30?'vig-crit':n<=90?'vig-alerta':'vig-ok', txt:'vence em '+n+(n===1?' dia':' dias'), dias:n, fim};
+}
+/* valor já executado do tipo: competências fechadas + lançamentos da competência atual */
+function vigExecutado(t){
+  let v=0;
+  (STATE.historico||[]).forEach(h=>{ const pc=getPeriodoPorConvenio(h); if(pc && pc[t.key]) v+=Number(pc[t.key].valor)||0; });
+  (STATE.lancamentos||[]).forEach(l=>{ if(l.convenio===t.key) v+=Number(l.valorTotal)||0; });
+  return Math.round(v*100)/100;
+}
+function vigLabs(t){ const s=new Set(); (STATE.exames||[]).forEach(e=>{ if(e.convenio===t.cadastroValue && e.laboratorio) s.add(e.laboratorio); }); return [...s].sort(); }
+function vigUnidTxt(t){ const n=Number(t.vigPrazo)||0; const u=t.vigUnidade||'meses'; return n+' '+(n===1?({meses:'mês',dias:'dia',anos:'ano'})[u]:u); }
+(function(){
+  const st=document.createElement('style'); st.textContent=`
+.vig-box{margin-top:12px;padding:12px 14px;border:1px dashed var(--line,#d9e2dd);border-radius:10px;background:rgba(14,124,97,.04);}
+.vig-tit{font-weight:700;font-size:13px;margin-bottom:8px;}
+.vig-fim{min-height:36px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;}
+.vig-chip{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 9px;white-space:nowrap;}
+.vig-ok{background:#E3F6EC;color:#13784A;}
+.vig-alerta{background:#FFF1D6;color:#8A5A00;}
+.vig-crit{background:#FDE2E1;color:#B42318;}
+.vig-venc{background:#EEF0F2;color:#5B6470;}
+.vig-sem{background:#F2F4F5;color:#8A939C;}
+.vig-resumo{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px;}
+.vig-stat{background:#fff;border:1px solid var(--line,#d9e2dd);border-radius:12px;padding:12px 14px;cursor:pointer;}
+.vig-stat b{display:block;font-size:24px;margin-top:2px;}
+.vig-stat span{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:#6B7280;font-weight:700;}
+.vig-stat.vig-st-crit b{color:#B42318;} .vig-stat.vig-st-alerta b{color:#8A5A00;}
+.vig-abas{display:flex;gap:4px;border-bottom:1px solid var(--line,#d9e2dd);margin-bottom:12px;flex-wrap:wrap;}
+.vig-aba{border:0;background:transparent;padding:9px 14px;font:inherit;font-size:13.5px;cursor:pointer;border-bottom:2px solid transparent;color:#4B5563;}
+.vig-aba.on{border-bottom-color:currentColor;color:#0E5C4A;font-weight:700;}
+.vig-aba small{color:#8A939C;font-weight:400;margin-left:3px;}
+.vig-filtro{display:flex;gap:10px;align-items:center;margin-bottom:12px;}
+.vig-filtro input{flex:1;padding:9px 12px;border:1px solid var(--line,#d9e2dd);border-radius:10px;font:inherit;}
+.vig-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
+.vig-card{border:1px solid var(--line,#d9e2dd);border-radius:12px;padding:14px 15px;background:#fff;display:flex;flex-direction:column;gap:6px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+.vig-card.vig-c-crit{border-left:4px solid #D92D20;} .vig-card.vig-c-alerta{border-left:4px solid #F0A500;} .vig-card.vig-c-venc{opacity:.85;}
+.vig-topo{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;}
+.vig-nome{font-weight:800;font-size:14px;line-height:1.3;}
+.vig-sub{font-size:12px;color:#6B7280;}
+.vig-labs{font-size:12.5px;color:#374151;}
+.vig-datas{display:flex;justify-content:space-between;font-size:12px;color:#4B5563;margin-top:2px;}
+.vig-barra{height:6px;border-radius:999px;background:#E5E7EB;overflow:hidden;}
+.vig-barra div{height:100%;background:#2563EB;border-radius:999px;}
+.vig-barra.vig-b-alto div{background:#D92D20;}
+.vig-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
+.vig-tag{font-size:11.5px;border-radius:7px;padding:2px 8px;background:#EEF4FF;color:#1D4ED8;}
+.vig-tag.vig-t-aviso{background:#FDE2E1;color:#B42318;}
+.vig-tag.vig-t-cinza{background:#F3F4F6;color:#4B5563;}
+.vig-vazio{padding:30px;text-align:center;color:#6B7280;}
+`; document.head.appendChild(st);
+})();
+/* ---------- formulário e tabela dos Tipos de Convênio/Processo ---------- */
+function tcVigCamposHTML(editing){
+  const t=editing||{};
+  return `<div class="vig-box"><div class="vig-tit">📅 Vigência do convênio / processo / contrato</div>
+    <div class="formgrid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">
+      <div class="field"><label>Data de início</label><input id="tcInicio" type="date" value="${esc(t.vigInicio||'')}" oninput="tcVigAtualizar()"></div>
+      <div class="field"><label>Prazo de duração</label><div style="display:flex;gap:6px;"><input id="tcPrazo" type="number" min="1" step="1" style="flex:1;min-width:0;" placeholder="ex.: 12" value="${Number(t.vigPrazo)>0?Number(t.vigPrazo):''}" oninput="tcVigAtualizar()"><select id="tcPrazoUn" onchange="tcVigAtualizar()" style="width:auto;">${VIG_UNIDADES.map(u=>`<option value="${u}" ${(t.vigUnidade||'meses')===u?'selected':''}>${u}</option>`).join('')}</select></div></div>
+      <div class="field"><label>Valor contratado (R$) — opcional</label><input id="tcValor" type="number" min="0" step="0.01" placeholder="para ver o quanto já foi usado" value="${Number(t.vigValor)>0?Number(t.vigValor):''}"></div>
+      <div class="field"><label>Vencimento</label><div id="tcFim" class="vig-fim">${tcVigFimHTML(t)}</div></div>
+    </div>
+    <div class="muted" style="font-size:11.5px;">Deixe em branco se não tiver prazo. Prorrogou por aditivo? Edite o tipo e aumente o prazo (ou cadastre o aditamento como um tipo novo). Acompanhe tudo em <b>Vencimentos dos Convênios</b>.</div></div>`;
+}
+function tcVigFimHTML(t){ const fim=vigFim(t); if(!fim) return '<span class="muted">informe o início e o prazo</span>'; const s=vigSituacao(t); return `<b>${fmtDateBR(fim)}</b> <span class="vig-chip ${s.cls}">${s.txt}</span>`; }
+function tcVigAtualizar(){
+  const el=document.getElementById('tcFim'); if(!el) return;
+  el.innerHTML=tcVigFimHTML({vigInicio:document.getElementById('tcInicio').value, vigPrazo:Number(document.getElementById('tcPrazo').value)||0, vigUnidade:document.getElementById('tcPrazoUn').value});
+}
+/* lê os campos de vigência; devolve null (e avisa) se estiverem incompletos */
+function tcVigLer(){
+  const g=id=>document.getElementById(id); if(!g('tcInicio')) return {};
+  const ini=g('tcInicio').value||''; const pz=Math.round(Number(g('tcPrazo').value)||0); const un=g('tcPrazoUn').value||'meses'; const val=Number(g('tcValor').value)||0;
+  if(pz>0 && !ini){ showToast('Informe a data de início da vigência (ou apague o prazo).'); return null; }
+  if(ini && !(pz>0)){ showToast('Informe o prazo de duração (ou apague a data de início).'); return null; }
+  const o={vigInicio:ini, vigPrazo:pz>0?pz:0, vigUnidade:un, vigValor:val>0?Math.round(val*100)/100:0};
+  o.vigFim=vigFim(o); return o;
+}
+function tcVigCelulasHTML(t){
+  const fim=vigFim(t); const s=vigSituacao(t);
+  return `<td>${fim?`${fmtDateBR(t.vigInicio)} a ${fmtDateBR(fim)}<div class="muted" style="font-size:11px;">${esc(vigUnidTxt(t))}${Number(t.vigValor)>0?' · '+fmtMoney(t.vigValor):''}</div>`:'<span class="muted">—</span>'}</td><td><span class="vig-chip ${s.cls}">${s.txt}</span></td>`;
+}
+/* ---------- tela Vencimentos dos Convênios ---------- */
+let vencAba='avencer', vencBusca='';
+function vencNorm(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
+function vencItens(){ return (STATE.tiposConvenio||[]).map(t=>({t, s:vigSituacao(t), fim:vigFim(t), labs:vigLabs(t)})); }
+function viewVencimentos(){
+  const it=vencItens();
+  const aVencer=it.filter(x=>x.fim && x.s.dias>=0), venc=it.filter(x=>x.fim && x.s.dias<0 && x.s.dias>=-365), sem=it.filter(x=>!x.fim);
+  const c30=aVencer.filter(x=>x.s.dias<=30).length, c90=aVencer.filter(x=>x.s.dias<=90).length;
+  const aba=(k,r,n)=>`<button type="button" class="vig-aba ${vencAba===k?'on':''}" onclick="vencAba='${k}';render()">${r} <small>(${n})</small></button>`;
+  return `<div class="helpbox">Prazo de vencimento de cada <b>convênio, processo, contrato, pregão ou compra direta</b> cadastrado em <b>Tipos de Convênio/Processo</b>: o que vence primeiro aparece primeiro. A barra mostra o valor já executado (exames lançados na competência e nas competências fechadas) diante do valor contratado. Para incluir ou ajustar o início, o prazo ou o valor, use <a href="#" onclick="goto('tiposConvenio');return false;">Tipos de Convênio/Processo</a>.</div>
+    <div class="vig-resumo">
+      <div class="vig-stat" onclick="vencAba='avencer';render()"><span>A vencer</span><b>${aVencer.length}</b></div>
+      <div class="vig-stat vig-st-crit" onclick="vencAba='avencer';render()"><span>Vencem em até 30 dias</span><b>${c30}</b></div>
+      <div class="vig-stat vig-st-alerta" onclick="vencAba='avencer';render()"><span>Vencem em até 90 dias</span><b>${c90}</b></div>
+      <div class="vig-stat" onclick="vencAba='vencidos';render()"><span>Vencidos (12 meses)</span><b>${venc.length}</b></div>
+      <div class="vig-stat" onclick="vencAba='sem';render()"><span>Sem vigência informada</span><b>${sem.length}</b></div>
+    </div>
+    <div class="card">
+      <div class="vig-abas">${aba('avencer','A vencer',aVencer.length)}${aba('vencidos','Vencidos (12 meses)',venc.length)}${aba('todos','Todos',it.length)}${aba('sem','Sem vigência',sem.length)}</div>
+      <div class="vig-filtro"><input id="vencBusca" placeholder="🔎 Nome do convênio, processo, contrato ou laboratório" value="${esc(vencBusca)}" oninput="vencBusca=this.value;vencListaAtualizar()"><span class="muted" id="vencQtd"></span><button class="btn secondary small no-print" onclick="window.print()">🖨️ Imprimir</button></div>
+      <div id="vencLista">${vencListaHTML()}</div>
+    </div>`;
+}
+function vencListaHTML(){
+  const it=vencItens(); let l=vencAba==='avencer'?it.filter(x=>x.fim && x.s.dias>=0):vencAba==='vencidos'?it.filter(x=>x.fim && x.s.dias<0 && x.s.dias>=-365):vencAba==='sem'?it.filter(x=>!x.fim):it;
+  const q=vencNorm(vencBusca).trim(); if(q) l=l.filter(x=>q.split(/\s+/).every(p=>vencNorm([x.t.label, x.t.cadastroValue, x.labs.join(' ')].join(' ')).includes(p)));
+  l=l.slice().sort((a,b)=>{ if(!a.fim && !b.fim) return String(a.t.label).localeCompare(String(b.t.label)); if(!a.fim) return 1; if(!b.fim) return -1; return vencAba==='vencidos'?b.fim.localeCompare(a.fim):a.fim.localeCompare(b.fim); });
+  setTimeout(()=>{ const q2=document.getElementById('vencQtd'); if(q2) q2.textContent=l.length+(l.length===1?' item':' itens'); }, 0);
+  if(!l.length) return `<div class="vig-vazio">${vencAba==='sem'?'Todos os tipos têm vigência informada. 👍':'Nada nesta aba'+(q?' para “'+esc(vencBusca)+'”':'')+'.'} ${vencAba!=='todos'?'<a href="#" onclick="vencAba=\'todos\';render();return false;">Ver todos</a>':''}</div>`;
+  return `<div class="vig-grid">${l.map(vencCardHTML).join('')}</div>`;
+}
+function vencListaAtualizar(){ const el=document.getElementById('vencLista'); if(el) el.innerHTML=vencListaHTML(); }
+function vencCardHTML(x){
+  const t=x.t, s=x.s; const exec=vigExecutado(t); const val=Number(t.vigValor)||0; const pct=val>0?Math.min(999, Math.round(exec/val*100)):0;
+  const nEx=(STATE.exames||[]).filter(e=>e.convenio===t.cadastroValue).length;
+  const cls=s.cls==='vig-crit'?'vig-c-crit':s.cls==='vig-alerta'?'vig-c-alerta':s.cls==='vig-venc'?'vig-c-venc':'';
+  return `<div class="vig-card ${cls}">
+    <div class="vig-topo"><div class="vig-nome">${esc(t.label)}</div><span class="vig-chip ${s.cls}">${s.txt}</span></div>
+    <div class="vig-sub">${x.fim?'prazo de '+esc(vigUnidTxt(t)):'início e prazo não informados'} · ${t.usaCotaReserva?'cota principal '+fmtNum(t.pctPrincipal)+'% / reserva '+fmtNum(t.pctReserva)+'%':'somente cota principal'}</div>
+    <div class="vig-labs">${x.labs.length?'🏥 '+esc(x.labs.slice(0,3).join(', '))+(x.labs.length>3?' e mais '+(x.labs.length-3):''):'<span class="muted">nenhum exame cadastrado neste tipo</span>'}</div>
+    <div class="vig-datas"><span>${x.fim?'início '+fmtDateBR(t.vigInicio):''}</span><span>${x.fim?'<b>fim '+fmtDateBR(x.fim)+'</b>':''}</span></div>
+    ${val>0?`<div class="vig-barra ${pct>=75?'vig-b-alto':''}"><div style="width:${Math.min(100,pct)}%"></div></div><div class="vig-datas"><span>${fmtMoney(exec)} executado</span><span>${pct}% de ${fmtMoney(val)}</span></div>`:`<div class="vig-datas"><span>${fmtMoney(exec)} executado</span><span class="muted">valor contratado não informado</span></div>`}
+    <div class="vig-tags">${nEx?`<span class="vig-tag">🧾 ${nEx} exame(s)</span>`:''}${val>0&&pct>=75?`<span class="vig-tag vig-t-aviso">saldo ${pct>=100?'esgotado':'de '+Math.max(0,100-pct)+'%'}</span>`:''}${s.dias!==null&&s.dias>=0&&s.dias<=90?`<span class="vig-tag vig-t-aviso">providenciar renovação</span>`:''}${!x.fim?`<span class="vig-tag vig-t-cinza">informe a vigência</span>`:''}<span class="vig-tag vig-t-cinza edit-only" style="cursor:pointer;" onclick="editTipoConvenio('${t.key}');goto('tiposConvenio')">✏️ editar</span></div>
+  </div>`;
+}
+
 function onToggleTcUsaReserva(){
   const checked = document.getElementById('tcUsaReserva').checked;
   document.getElementById('tcPercentuaisWrap').style.display = checked ? 'grid' : 'none';
@@ -4205,6 +4371,7 @@ function saveTipoConvenio(){
   if(semPermissao('tiposConvenio')) return;
   const label = document.getElementById('tcLabel').value.trim();
   if(!label){ showToast('Informe o nome do tipo de convênio/processo.'); return; }
+  const vig = tcVigLer(); if(!vig) return;
   const usaCotaReserva = document.getElementById('tcUsaReserva').checked;
   let pctPrincipal = 100, pctReserva = 0;
   if(usaCotaReserva){
@@ -4219,6 +4386,7 @@ function saveTipoConvenio(){
     t.usaCotaReserva = usaCotaReserva;
     t.pctPrincipal = pctPrincipal;
     t.pctReserva = pctReserva;
+    Object.assign(t, vig);
     editingTipoConvenioKey = null;
     saveState(); render();
     showToast('Tipo de convênio/processo atualizado. Os exames já cadastrados não foram alterados; a nova configuração de cotas vale para os próximos exames salvos.');
@@ -4226,7 +4394,7 @@ function saveTipoConvenio(){
     const key = slugKeyFromLabel(label);
     const cadastroValue = label.toUpperCase();
     const badge = BADGE_CLASSES[STATE.tiposConvenio.length % BADGE_CLASSES.length];
-    STATE.tiposConvenio.push({ key, label, cadastroValue, badge, usaCotaReserva, pctPrincipal, pctReserva });
+    STATE.tiposConvenio.push(Object.assign({ key, label, cadastroValue, badge, usaCotaReserva, pctPrincipal, pctReserva }, vig));
     saveState(); render(); showToast('Tipo de convênio/processo cadastrado.');
   }
 }
