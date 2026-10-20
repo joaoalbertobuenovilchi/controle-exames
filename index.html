@@ -1004,10 +1004,13 @@ function trocarCodigoAcesso(){
                                 Convênios" (a vencer, vencidos, valor já executado)
      4.33.2026  19/10/2026      Retirado o carregamento da biblioteca Chart.js (não é usada — os
                                 gráficos são em HTML puro — e o endereço no cdnjs dava erro 404)
+     4.34.2026  20/10/2026      Cotas: a quantidade "Usada" e a divisão cota principal/reserva passam a
+                                somar TODAS as competências (as fechadas e a atual) — antes voltavam a
+                                zero a cada fechamento; usada acima da cota principal aparece em vermelho
    ============================================================ */
 const APP_CRIACAO = { mes: 7, ano: 2026 };   // julho/2026 = mês 1
-const APP_ALTERACAO = 33;                     // nº acumulado de alterações publicadas
-const APP_DATA = '2026-10-19';                // data desta versão (AAAA-MM-DD)
+const APP_ALTERACAO = 34;                     // nº acumulado de alterações publicadas
+const APP_DATA = '2026-10-20';                // data desta versão (AAAA-MM-DD)
 function appVersao(){
   const p = APP_DATA.split('-').map(Number);
   const ano = p[0], mes = p[1];
@@ -1197,7 +1200,7 @@ function recalcularTodasCotas(){
     const exame = STATE.exames.find(e=>e.id===exameId);
     if(!exame) return;
     const lancs = porExame[exameId].slice().sort((a,b)=> String(a.data||'').localeCompare(String(b.data||'')));
-    let usadoCP = 0;
+    let usadoCP = (usoHistorico()[exameId]||{}).cp || 0;   /* 4.34: parte do que já foi usado nas competências fechadas */
     lancs.forEach(l=>{
       const restoCP = Math.max((Number(exame.cotaPrincipal)||0) - usadoCP, 0);
       const novoCP = Math.min(l.quantidade, restoCP);
@@ -1645,11 +1648,28 @@ function examesFor(convenioLabel_, laboratorio){
   return STATE.exames.filter(e => e.convenio === convenioLabel_ && e.laboratorio === laboratorio && e.tipo === 'ATIVO');
 }
 
-/* Quantidade já usada de cota principal para um exame, dentro da competência atual */
+/* Quantidade já usada de cota principal de um exame — 4.34: em TODAS as competências (as já
+   fechadas, guardadas no histórico, e a atual). A cota do exame vale para o período/contrato
+   inteiro; até a 4.33 contava só a competência atual e voltava a zero a cada fechamento.
+   O histórico é somado uma vez e guardado enquanto não muda (fechar/restaurar competência). */
+let _usoHistCache = null;
+function usoHistorico(){
+  const h = STATE.historico || [];
+  const chave = h.length+'|'+h.reduce((s,x)=>s+((x.lancamentos||[]).length),0)+'|'+((h[h.length-1]||{}).id||'');
+  if(_usoHistCache && _usoHistCache.chave===chave) return _usoHistCache.mapa;
+  const mapa = {};
+  h.forEach(x=>(x.lancamentos||[]).forEach(l=>{
+    if(!l.exameId) return;
+    const m = mapa[l.exameId] || (mapa[l.exameId] = {cp:0, cr:0});
+    m.cp += Number(l.qtdCP)||0; m.cr += Number(l.qtdCR)||0;
+  }));
+  _usoHistCache = {chave, mapa};
+  return mapa;
+}
 function usoCotaPrincipal(exameId){
-  return STATE.lancamentos
+  return ((usoHistorico()[exameId]||{}).cp||0) + STATE.lancamentos
     .filter(l=>l.exameId===exameId)
-    .reduce((s,l)=>s+l.qtdCP,0);
+    .reduce((s,l)=>s+(Number(l.qtdCP)||0),0);
 }
 
 /* ---------------- Navigation ----------------
@@ -3905,7 +3925,7 @@ function renderExamesRows(){
       <td>${esc(e.convenio)}</td>
       <td>${esc(e.periodo)||'—'}</td>
       <td class="right">${fmtNum(e.cotaPrincipal)}</td>
-      <td class="right">${fmtNum(usada)}</td>
+      <td class="right" ${usada>(Number(e.cotaPrincipal)||0)?`style="color:#B42318;font-weight:700;" title="Usada acima da cota principal (somando todas as competências)"`:`title="Cota principal usada em todas as competências"`}>${fmtNum(usada)}</td>
       <td class="right">${fmtNum(e.cotaReserva)}</td>
       <td class="right">${fmtMoney(e.valorUnit)}</td>
       <td class="edit-only"><button class="btn ghost small" onclick="editExame('${e.id}')">✏️ editar</button> <button class="btn ghost small" onclick="deleteExame('${e.id}')">🗑</button></td>
@@ -4531,7 +4551,7 @@ function examesOptsFor(cadConv, laboratorio){
   return list.map(e=>`<option value="${e.id}">${esc(e.descricao)} (saldo: ${fmtNum(e.cotaPrincipal+e.cotaReserva-usoCotaPrincipal(e.id)-usoCotaReserva(e.id))})</option>`).join('');
 }
 function usoCotaReserva(exameId){
-  return STATE.lancamentos.filter(l=>l.exameId===exameId).reduce((s,l)=>s+l.qtdCR,0);
+  return ((usoHistorico()[exameId]||{}).cr||0) + STATE.lancamentos.filter(l=>l.exameId===exameId).reduce((s,l)=>s+(Number(l.qtdCR)||0),0);
 }
 function setLancTab(t){ lancTab=t; render(); }
 /* ---------------- Exclusão em lote de lançamentos importados (Lançar Exames) ----------------
